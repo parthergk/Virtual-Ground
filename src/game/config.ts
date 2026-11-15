@@ -41,9 +41,9 @@ export const LIGHT_POLE = {
 /** Player sprite sheet layout for me.png (6 columns x 4 rows) */
 export const PLAYER_SPRITE = {
   frameWidth: 192,
-  frameHeight: 288,
-  displayWidth: 28,
-  displayHeight: 42,
+  frameHeight: 256,
+  displayWidth: 27,
+  displayHeight: 36,
   columns: 6,
   rows: 4,
   /** Row indices for each facing direction */
