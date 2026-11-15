@@ -79,30 +79,12 @@ export class GroundScene extends Phaser.Scene {
     const facingDir = (spawn.facing as Direction) || "up";
     this.player = new Player(this, spawn.x, spawn.y, facingDir);
 
-    // Setup responsive camera with world bounds
+    // Setup responsive camera
     this.cameras.main.setBounds(0, 0, MAP.width, MAP.height);
     this.handleResize();
 
     // Listen to scale/resize events
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
-
-    // Interactive mouse-wheel zoom (smoothly clamps between 1.0x overview and 2.4x close-up)
-    this.input.on(
-      Phaser.Input.Events.POINTER_WHEEL,
-      (
-        _pointer: Phaser.Input.Pointer,
-        _gameObjects: unknown[],
-        _deltaX: number,
-        deltaY: number
-      ) => {
-        const camera = this.cameras?.main;
-        if (!camera) return;
-        const currentZoom = camera.zoom;
-        const zoomDelta = deltaY > 0 ? -0.15 : 0.15;
-        const newZoom = Phaser.Math.Clamp(currentZoom + zoomDelta, 1.0, 2.4);
-        camera.zoomTo(newZoom, 150, "Cubic.easeOut");
-      }
-    );
 
     // Ensure resources are cleaned up when the scene shuts down or game is destroyed
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
@@ -118,19 +100,20 @@ export class GroundScene extends Phaser.Scene {
     const height = window.innerHeight;
     const screenAspect = width / (height || 1);
 
-    // Dynamic zoom based on screen orientation:
-    // - Portrait mobile: 1.8x - 2.2x zoom so character and surroundings are large
-    // - Landscape (laptop / mobile landscape): 1.6x zoom for clear, detailed character visibility while keeping plenty of the courtyard in view
-    const targetZoom =
-      screenAspect < 1.0
-        ? Math.min(2.2, Math.max(1.8, 1.8 / screenAspect))
-        : 1.6;
-
-    camera.setZoom(targetZoom);
-
-    // Smoothly follow the player with gentle cinematic lerp (0.08)
-    if (this.player?.sprite) {
-      camera.startFollow(this.player.sprite, true, 0.08, 0.08);
+    if (screenAspect < 1.0) {
+      // Portrait screen (mobile phone held vertically):
+      // Zoom in smoothly and follow the player so the character is clearly visible
+      const portraitZoom = Math.min(1.8, Math.max(1.3, 1 / screenAspect));
+      camera.setZoom(portraitZoom);
+      if (this.player?.sprite) {
+        camera.startFollow(this.player.sprite, true, 0.1, 0.1);
+      }
+    } else {
+      // Landscape screen (desktop, laptop, tablet, phone in landscape):
+      // Stop follow and show the full Ramlila Ground centered
+      camera.stopFollow();
+      camera.setZoom(1);
+      camera.centerOn(MAP.width / 2, MAP.height / 2);
     }
   }
 
