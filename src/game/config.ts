@@ -38,12 +38,12 @@ export const LIGHT_POLE = {
   depth: 5, // Above ground, foreground depth
 } as const;
 
-/** Player sprite sheet layout for me.png (6 columns x 4 rows) */
+/** Player sprite sheet layout for me.png (6 columns x 4 rows, pre-baked 1:1 pixel art) */
 export const PLAYER_SPRITE = {
-  frameWidth: 192,
-  frameHeight: 256,
-  displayWidth: 27,
-  displayHeight: 36,
+  frameWidth: 36,
+  frameHeight: 48,
+  displayWidth: 36,
+  displayHeight: 48,
   columns: 6,
   rows: 4,
   /** Row indices for each facing direction */

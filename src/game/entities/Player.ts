@@ -29,13 +29,13 @@ export class Player {
     // Shadow sits slightly below the player sprite in depth order
     this.shadow = scene.add.image(x, y, "shadow");
     this.shadow.setOrigin(0.5, 0.5);
-    this.shadow.setDisplaySize(20, 8);
+    this.shadow.setDisplaySize(24, 9);
     this.shadow.setAlpha(0.55);
     this.shadow.setDepth(0);
 
     // Player sprite anchored at feet baseline so sprite stands on shadow
     this.sprite = scene.add.sprite(x, y, "player");
-    this.sprite.setOrigin(0.5, 0.985);
+    this.sprite.setOrigin(0.5, 0.98);
     const scale = PLAYER_SPRITE.displayWidth / PLAYER_SPRITE.frameWidth;
     this.sprite.setScale(scale);
     this.sprite.setDepth(1);
