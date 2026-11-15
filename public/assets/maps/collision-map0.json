@@ -1,0 +1,297 @@
+{
+  "map": {
+    "width": 1774,
+    "height": 887,
+    "coordinate_system": "pixel",
+    "origin": "top-left",
+    "background": "ground-map.png"
+  },
+  "collision_settings": {
+    "player_collision_shape": "circle",
+    "player_radius": 9,
+    "check_position": "feet",
+    "blocked_polygon_behavior": "prevent entry and allow sliding along edges",
+    "world_bounds": {
+      "min_x": 8,
+      "min_y": 8,
+      "max_x": 1766,
+      "max_y": 744
+    }
+  },
+  "spawn": {
+    "x": 875,
+    "y": 680,
+    "direction": "up"
+  },
+  "blocked": [
+    {
+      "id": "left_house",
+      "type": "building",
+      "polygon": [
+        [
+          0,
+          0
+        ],
+        [
+          315,
+          0
+        ],
+        [
+          315,
+          418
+        ],
+        [
+          255,
+          505
+        ],
+        [
+          112,
+          684
+        ],
+        [
+          0,
+          744
+        ]
+      ]
+    },
+    {
+      "id": "rear_building_platform",
+      "type": "building",
+      "polygon": [
+        [
+          145,
+          205
+        ],
+        [
+          1315,
+          205
+        ],
+        [
+          1315,
+          405
+        ],
+        [
+          1008,
+          405
+        ],
+        [
+          1008,
+          420
+        ],
+        [
+          278,
+          420
+        ],
+        [
+          145,
+          400
+        ]
+      ]
+    },
+    {
+      "id": "rear_wall",
+      "type": "wall",
+      "polygon": [
+        [
+          305,
+          205
+        ],
+        [
+          1315,
+          205
+        ],
+        [
+          1315,
+          305
+        ],
+        [
+          305,
+          305
+        ]
+      ]
+    },
+    {
+      "id": "rear_wall_right",
+      "type": "wall",
+      "polygon": [
+        [
+          1000,
+          205
+        ],
+        [
+          1325,
+          205
+        ],
+        [
+          1325,
+          365
+        ],
+        [
+          1000,
+          365
+        ]
+      ]
+    },
+    {
+      "id": "upper_right_small_house",
+      "type": "building",
+      "polygon": [
+        [
+          1335,
+          125
+        ],
+        [
+          1470,
+          125
+        ],
+        [
+          1470,
+          285
+        ],
+        [
+          1335,
+          285
+        ]
+      ]
+    },
+    {
+      "id": "right_side_house",
+      "type": "building",
+      "polygon": [
+        [
+          1460,
+          275
+        ],
+        [
+          1774,
+          275
+        ],
+        [
+          1774,
+          570
+        ],
+        [
+          1575,
+          570
+        ]
+      ]
+    },
+    {
+      "id": "bench_upper",
+      "type": "bench",
+      "polygon": [
+        [
+          1290,
+          405
+        ],
+        [
+          1345,
+          397
+        ],
+        [
+          1380,
+          466
+        ],
+        [
+          1325,
+          480
+        ]
+      ]
+    },
+    {
+      "id": "bench_middle",
+      "type": "bench",
+      "polygon": [
+        [
+          1338,
+          458
+        ],
+        [
+          1395,
+          448
+        ],
+        [
+          1435,
+          523
+        ],
+        [
+          1378,
+          538
+        ]
+      ]
+    },
+    {
+      "id": "bench_lower",
+      "type": "bench",
+      "polygon": [
+        [
+          1390,
+          520
+        ],
+        [
+          1450,
+          510
+        ],
+        [
+          1495,
+          590
+        ],
+        [
+          1432,
+          610
+        ]
+      ]
+    },
+    {
+      "id": "badminton_net",
+      "type": "net",
+      "polygon": [
+        [
+          858,
+          430
+        ],
+        [
+          871,
+          430
+        ],
+        [
+          878,
+          587
+        ],
+        [
+          865,
+          587
+        ]
+      ]
+    },
+    {
+      "id": "front_curb_boundary",
+      "type": "boundary",
+      "polygon": [
+        [
+          0,
+          744
+        ],
+        [
+          1774,
+          744
+        ],
+        [
+          1774,
+          768
+        ],
+        [
+          0,
+          768
+        ]
+      ]
+    }
+  ],
+  "walkable_notes": [
+    "All unblocked courtyard ground is walkable, including both halves of the badminton court.",
+    "Each bench has its own small collision polygon; walk around the benches and through the gaps.",
+    "The badminton net alone is blocked. Leave the court and go around either end of the net to reach the other side.",
+    "The tiled path in front of the right-side house remains walkable.",
+    "The road below the front curb is outside the playable area."
+  ]
+}
