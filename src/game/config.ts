@@ -87,8 +87,8 @@ export function createGameConfig(
       noAudio: true, // disable Web Audio until sound effects/music are introduced
     },
     scale: {
-      mode: phaser.Scale.FIT,
-      autoCenter: phaser.Scale.CENTER_BOTH,
+      mode: phaser.Scale.ENVELOP,
+      autoCenter: phaser.Scale.NO_CENTER,
       parent,
       width: MAP.width,
       height: MAP.height,

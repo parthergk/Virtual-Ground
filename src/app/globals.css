@@ -30,6 +30,9 @@ body {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
 }
 
 #game-container canvas {
@@ -38,4 +41,6 @@ body {
   image-rendering: -webkit-crisp-edges;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  margin-top: auto !important;
+  margin-bottom: 0 !important;
 }
