@@ -68,12 +68,6 @@ export class GroundScene extends Phaser.Scene {
     this.movementSystem = new MovementSystem();
     this.movementSystem.init(this);
 
-    // Enable linear filtering on high-res player sprite sheet for clean, sharp downscaling
-    const playerTexture = this.textures.get("player");
-    if (playerTexture) {
-      playerTexture.setFilter(Phaser.Textures.FilterMode.LINEAR);
-    }
-
     // Spawn player just inside the main entrance
     const spawn = this.collisionSystem.getSpawnPoint();
     const facingDir = (spawn.facing as Direction) || "up";

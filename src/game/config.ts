@@ -82,6 +82,10 @@ export function createGameConfig(
     roundPixels: true,
     antialias: false,
     backgroundColor: "#000000",
+    banner: false,
+    audio: {
+      noAudio: true, // disable Web Audio until sound effects/music are introduced
+    },
     scale: {
       mode: phaser.Scale.FIT,
       autoCenter: phaser.Scale.CENTER_BOTH,
