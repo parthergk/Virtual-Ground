@@ -94,45 +94,85 @@ export default function MobileControls() {
 
   if (!visible) return null;
 
+  // 44px buttons — compact but still easy to hit
+  const SZ = 44;
+
   const btnBase: React.CSSProperties = {
-    width: 56,
-    height: 56,
+    width: SZ,
+    height: SZ,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     background: "rgba(0,0,0,0.55)",
     border: "2px solid rgba(255,255,255,0.18)",
-    borderRadius: 10,
+    borderRadius: 8,
     color: "#fff",
-    fontSize: 22,
+    fontSize: 17,
+    // Prevent browser text-selection, tap-highlight and callout — these
+    // are what cause the haptic "selection" vibration on Android/iOS.
     touchAction: "none",
     userSelect: "none",
     WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    WebkitTapHighlightColor: "transparent",
+    outline: "none",
     cursor: "pointer",
     transition: "background 0.08s",
-    // pressed state handled via CSS attr selector below
   };
 
   return (
     <>
-      {/* Inline style for pressed state — avoids className generation overhead */}
+      {/* Pressed state + global selection kill for the overlay */}
       <style>{`
         [data-pressed="true"] {
           background: rgba(180, 83, 9, 0.75) !important;
           border-color: rgba(255,255,255,0.45) !important;
         }
+        /* Belt-and-braces: kill tap highlight on every control button */
+        [data-ctrl] {
+          -webkit-tap-highlight-color: transparent;
+          -webkit-touch-callout: none;
+          -webkit-user-select: none;
+          user-select: none;
+        }
       `}</style>
 
-      {/* D-pad — bottom-left with safe-area inset */}
+      {/* EXIT button — top-right */}
+      <button
+        data-ctrl
+        onClick={handleExit}
+        style={{
+          position: "absolute",
+          right: "max(12px, env(safe-area-inset-right, 12px))",
+          top: "max(12px, env(safe-area-inset-top, 12px))",
+          ...btnBase,
+          width: "auto",
+          height: "auto",
+          paddingTop: 6,
+          paddingBottom: 6,
+          paddingLeft: 14,
+          paddingRight: 14,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.08em",
+          zIndex: 40,
+          touchAction: "manipulation",
+        }}
+        aria-label="Exit game"
+      >
+        EXIT
+      </button>
+
+      {/* D-pad — bottom-right with safe-area inset */}
       <div
         style={{
           position: "absolute",
-          left: "max(16px, env(safe-area-inset-left, 16px))",
-          bottom: "max(16px, env(safe-area-inset-bottom, 16px))",
+          right: "max(12px, env(safe-area-inset-right, 12px))",
+          bottom: "max(12px, env(safe-area-inset-bottom, 12px))",
           display: "grid",
-          gridTemplateColumns: "56px 56px 56px",
-          gridTemplateRows: "56px 56px 56px",
-          gap: 4,
+          gridTemplateColumns: `${SZ}px ${SZ}px ${SZ}px`,
+          gridTemplateRows: `${SZ}px ${SZ}px ${SZ}px`,
+          gap: 3,
           zIndex: 40,
           touchAction: "none",
         }}
@@ -141,6 +181,7 @@ export default function MobileControls() {
         {/* Row 1: _, Up, _ */}
         <div />
         <button
+          data-ctrl
           ref={(el) => { btnRefs.current.up = el; }}
           style={btnBase}
           aria-label="Move up"
@@ -152,6 +193,7 @@ export default function MobileControls() {
 
         {/* Row 2: Left, _, Right */}
         <button
+          data-ctrl
           ref={(el) => { btnRefs.current.left = el; }}
           style={btnBase}
           aria-label="Move left"
@@ -161,6 +203,7 @@ export default function MobileControls() {
         </button>
         <div />
         <button
+          data-ctrl
           ref={(el) => { btnRefs.current.right = el; }}
           style={btnBase}
           aria-label="Move right"
@@ -172,6 +215,7 @@ export default function MobileControls() {
         {/* Row 3: _, Down, _ */}
         <div />
         <button
+          data-ctrl
           ref={(el) => { btnRefs.current.down = el; }}
           style={btnBase}
           aria-label="Move down"
@@ -181,28 +225,6 @@ export default function MobileControls() {
         </button>
         <div />
       </div>
-
-      {/* Exit button — bottom-right with safe-area inset */}
-      <button
-        onClick={handleExit}
-        style={{
-          position: "absolute",
-          right: "max(16px, env(safe-area-inset-right, 16px))",
-          bottom: "max(16px, env(safe-area-inset-bottom, 16px))",
-          ...btnBase,
-          width: "auto",
-          paddingLeft: 16,
-          paddingRight: 16,
-          fontSize: 13,
-          fontWeight: 600,
-          letterSpacing: "0.04em",
-          zIndex: 40,
-          touchAction: "manipulation",
-        }}
-        aria-label="Exit game"
-      >
-        EXIT
-      </button>
     </>
   );
 }
