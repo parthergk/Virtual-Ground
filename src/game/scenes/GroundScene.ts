@@ -21,9 +21,22 @@ export class GroundScene extends Phaser.Scene {
   private collisionSystem!: CollisionSystem;
   private movementSystem!: MovementSystem;
   private wasMoving = false;
+  private activeCharacter!: { id: string; spriteUrl: string; name?: string };
 
   constructor() {
     super({ key: "GroundScene" });
+  }
+
+  init(): void {
+    const registryChar = this.registry.get("character") as
+      | { id: string; spriteUrl: string; name?: string }
+      | undefined;
+
+    this.activeCharacter = registryChar || {
+      id: "player",
+      spriteUrl: ASSETS.characters.player,
+      name: "Aarav",
+    };
   }
 
   preload(): void {
@@ -31,10 +44,13 @@ export class GroundScene extends Phaser.Scene {
     this.load.image("gate", ASSETS.maps.gate);
     this.load.image("light-pole", ASSETS.maps.lightPole);
     this.load.json("collision-map", ASSETS.maps.collision);
-    this.load.spritesheet("player", ASSETS.characters.player, {
+
+    // Preload active character spritesheet
+    this.load.spritesheet(this.activeCharacter.id, this.activeCharacter.spriteUrl, {
       frameWidth: PLAYER_SPRITE.frameWidth,
       frameHeight: PLAYER_SPRITE.frameHeight,
     });
+
     this.load.image("shadow", ASSETS.characters.shadow);
   }
 
@@ -68,10 +84,16 @@ export class GroundScene extends Phaser.Scene {
     this.movementSystem = new MovementSystem();
     this.movementSystem.init(this);
 
-    // Spawn player just inside the main entrance
+    // Spawn player with active character skin
     const spawn = this.collisionSystem.getSpawnPoint();
     const facingDir = (spawn.facing as Direction) || "up";
-    this.player = new Player(this, spawn.x, spawn.y, facingDir);
+    this.player = new Player(
+      this,
+      spawn.x,
+      spawn.y,
+      facingDir,
+      this.activeCharacter.id
+    );
 
     // Setup responsive camera
     this.cameras.main.setBounds(0, 0, MAP.width, MAP.height);

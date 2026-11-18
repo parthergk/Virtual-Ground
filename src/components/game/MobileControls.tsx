@@ -25,7 +25,11 @@ function isTouchDevice(): boolean {
  * - Pressed visual state is toggled via a data-attribute on the DOM node
  *   directly (via refs) to avoid re-renders.
  */
-export default function MobileControls() {
+interface MobileControlsProps {
+  onExit?: () => void;
+}
+
+export default function MobileControls({ onExit }: MobileControlsProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -89,7 +93,11 @@ export default function MobileControls() {
 
   function handleExit() {
     resetMobileInput();
-    window.location.reload();
+    if (onExit) {
+      onExit();
+    } else {
+      window.location.reload();
+    }
   }
 
   if (!visible) return null;

@@ -10,6 +10,7 @@ export const ASSETS = {
   },
   characters: {
     player: "/assets/characters/me.png",
+    player2: "/assets/characters/player2.png",
     shadow: "/assets/characters/shadow.png",
   },
 } as const;
@@ -71,7 +72,8 @@ export const MOVEMENT = {
 export function createGameConfig(
   phaser: typeof Phaser,
   parent: HTMLElement,
-  scenes: Phaser.Types.Scenes.SceneType[]
+  scenes: Phaser.Types.Scenes.SceneType[],
+  initialData?: Record<string, unknown>
 ): Phaser.Types.Core.GameConfig {
   return {
     type: phaser.AUTO,
@@ -94,6 +96,15 @@ export function createGameConfig(
       height: MAP.height,
     },
     scene: scenes,
+    callbacks: {
+      preBoot: (game) => {
+        if (initialData) {
+          for (const [key, value] of Object.entries(initialData)) {
+            game.registry.set(key, value);
+          }
+        }
+      },
+    },
     input: {
       touch: {
         capture: true,
