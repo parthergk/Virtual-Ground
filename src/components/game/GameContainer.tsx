@@ -2,6 +2,7 @@
 
 import type * as PhaserType from "phaser";
 import { useEffect, useRef, useState } from "react";
+import MobileControls from "./MobileControls";
 
 /**
  * GameContainer — mounts the Phaser game instance into a DOM element.
@@ -126,6 +127,9 @@ export default function GameContainer() {
         className="w-full h-full relative overflow-hidden"
         id="game-container"
       />
+
+      {/* Mobile D-pad + Exit button overlay */}
+      <MobileControls />
 
       {/* Landscape Rotation Suggestion Overlay (Mobile Portrait Only) */}
       {isPortrait && !dismissPortraitPrompt && (

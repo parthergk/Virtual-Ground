@@ -3,6 +3,11 @@
 :root {
   --background: #000000;
   --foreground: #ffffff;
+  /* Safe-area inset fallbacks for browsers that don't support env() */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 @theme inline {
@@ -17,6 +22,8 @@ body {
   overflow: hidden;
   width: 100%;
   height: 100%;
+  /* Fill the entire screen including notch areas */
+  height: 100dvh;
   background-color: var(--background);
   color: var(--foreground);
 }
@@ -44,3 +51,13 @@ body {
   margin-top: auto !important;
   margin-bottom: 0 !important;
 }
+
+/* Mobile controls overlay — must not capture game canvas pointer events */
+.mobile-controls-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* children opt-in with pointer-events: auto */
+  z-index: 40;
+  touch-action: none;
+}
+

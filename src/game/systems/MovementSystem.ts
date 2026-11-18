@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { mobileInput, resetMobileInput } from "./MobileInput";
 
 /** Direction the player is facing */
 export type Direction = "up" | "down" | "left" | "right";
@@ -24,6 +25,9 @@ export class MovementSystem {
   private targetPos: { x: number; y: number } | null = null;
   private onPointerDownBound: ((pointer: Phaser.Input.Pointer) => void) | null = null;
 
+  /** Bound visibility-change handler so we can remove it on destroy */
+  private onVisibilityChangeBound: (() => void) | null = null;
+
   /** Bind keyboard and touch/pointer events. Call once during scene create(). */
   init(scene: Phaser.Scene): void {
     const kb = scene.input.keyboard;
@@ -37,12 +41,29 @@ export class MovementSystem {
       };
     }
 
-    // Touch / click-to-move support for mobile, tablet, and mouse
-    this.onPointerDownBound = (pointer: Phaser.Input.Pointer) => {
-      // Convert screen pointer position to game world coordinates
-      this.targetPos = { x: pointer.worldX, y: pointer.worldY };
+    // Touch / click-to-move support — desktop only.
+    // On touch/mobile devices the D-pad overlay handles movement; we skip
+    // tap-to-move so stray taps don't send the player walking.
+    const isMobile =
+      typeof window !== "undefined" &&
+      ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+
+    if (!isMobile) {
+      this.onPointerDownBound = (pointer: Phaser.Input.Pointer) => {
+        // Convert screen pointer position to game world coordinates
+        this.targetPos = { x: pointer.worldX, y: pointer.worldY };
+      };
+      scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDownBound);
+    }
+
+    // Clear mobile D-pad state when the tab is hidden (prevents stuck directions)
+    this.onVisibilityChangeBound = () => {
+      if (document.hidden) {
+        resetMobileInput();
+        this.targetPos = null;
+      }
     };
-    scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDownBound);
+    document.addEventListener("visibilitychange", this.onVisibilityChangeBound);
   }
 
   /** Cancel any active pointer destination. */
@@ -73,7 +94,13 @@ export class MovementSystem {
       if (this.cursors.down.isDown || this.wasd.S.isDown) iy += 1;
     }
 
-    // Keyboard overrides touch target
+    // 2. Check mobile D-pad input (additive with keyboard)
+    if (mobileInput.left) ix -= 1;
+    if (mobileInput.right) ix += 1;
+    if (mobileInput.up) iy -= 1;
+    if (mobileInput.down) iy += 1;
+
+    // Keyboard / D-pad overrides touch target
     if (ix !== 0 || iy !== 0) {
       this.targetPos = null;
     } else if (this.targetPos && currentPos) {
@@ -124,6 +151,11 @@ export class MovementSystem {
       scene.input?.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerDownBound);
       this.onPointerDownBound = null;
     }
+    if (this.onVisibilityChangeBound) {
+      document.removeEventListener("visibilitychange", this.onVisibilityChangeBound);
+      this.onVisibilityChangeBound = null;
+    }
+    resetMobileInput();
     scene.input?.keyboard?.removeAllKeys(true);
     this.cursors = null;
     this.wasd = null;
