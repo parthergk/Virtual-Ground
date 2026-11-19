@@ -92,13 +92,17 @@ export class GroundScene extends Phaser.Scene {
     this.movementSystem = new MovementSystem();
     this.movementSystem.init(this);
 
-    // Spawn local player with active character skin
-    const spawn = this.collisionSystem.getSpawnPoint();
-    const facingDir = (spawn.facing as Direction) || "up";
+    // Spawn local player with slight character-specific offset so multiple players don't spawn atop each other
+    const baseSpawn = this.collisionSystem.getSpawnPoint();
+    const spawnOffset = this.activeCharacter.id === "char_2" ? 28 : -14;
+    const spawnX = baseSpawn.x + spawnOffset;
+    const spawnY = baseSpawn.y;
+    const facingDir = (baseSpawn.facing as Direction) || "up";
+
     this.player = new Player(
       this,
-      spawn.x,
-      spawn.y,
+      spawnX,
+      spawnY,
       facingDir,
       this.activeCharacter.id
     );
@@ -154,8 +158,8 @@ export class GroundScene extends Phaser.Scene {
     this.networkManager.connect({
       code: this.playerCode,
       characterId: this.activeCharacter.id,
-      x: spawn.x,
-      y: spawn.y,
+      x: spawnX,
+      y: spawnY,
       direction: facingDir,
     });
 
@@ -207,6 +211,11 @@ export class GroundScene extends Phaser.Scene {
       pos
     );
 
+    // Gather remote players' ground positions for collision avoidance
+    const otherPlayers = Array.from(this.remotePlayers.values()).map((rp) =>
+      rp.getPosition()
+    );
+
     if (moving) {
       const radius = this.collisionSystem.getPlayerRadius();
       const resolved = this.collisionSystem.resolveMovement(
@@ -214,7 +223,8 @@ export class GroundScene extends Phaser.Scene {
         pos.y,
         pos.x + dx,
         pos.y + dy,
-        radius
+        radius,
+        otherPlayers
       );
 
       // If obstructed while tap-moving, clear target to avoid stuck animation

@@ -53,7 +53,11 @@ export class RemotePlayer {
     this.sprite.setOrigin(0.5, 0.98);
     const scale = PLAYER_SPRITE.displayWidth / PLAYER_SPRITE.frameWidth;
     this.sprite.setScale(scale);
-    this.sprite.setDepth(1);
+
+    // Initial dynamic Y-depth
+    const dynamicDepth = 1 + initialY / 1000;
+    this.sprite.setDepth(dynamicDepth);
+    this.shadow.setDepth(dynamicDepth - 0.001);
 
     this.ensureAnimations(scene);
     this.playIdle();
@@ -112,6 +116,9 @@ export class RemotePlayer {
       this.currentY = y;
       this.sprite.setPosition(x, y);
       this.shadow.setPosition(x, y - 2);
+      const dynamicDepth = 1 + y / 1000;
+      this.sprite.setDepth(dynamicDepth);
+      this.shadow.setDepth(dynamicDepth - 0.001);
     }
 
     this.targetX = x;
@@ -132,11 +139,24 @@ export class RemotePlayer {
     this.sprite.setPosition(this.currentX, this.currentY);
     this.shadow.setPosition(this.currentX, this.currentY - 2);
 
+    // Continuous dynamic depth based on ground Y coordinate:
+    // Characters closer to the camera (larger Y) always render in front of characters further up.
+    const dynamicDepth = 1 + this.currentY / 1000;
+    this.sprite.setDepth(dynamicDepth);
+    this.shadow.setDepth(dynamicDepth - 0.001);
+
     if (this.isMoving) {
       this.sprite.play(`walk-${this.characterKey}-${this.facing}`, true);
     } else {
       this.sprite.play(`idle-${this.characterKey}-${this.facing}`, true);
     }
+  }
+
+  /**
+   * Return current ground position and collision radius for obstacle separation.
+   */
+  getPosition(): { x: number; y: number; radius: number } {
+    return { x: this.currentX, y: this.currentY, radius: 8 };
   }
 
   private playIdle(): void {

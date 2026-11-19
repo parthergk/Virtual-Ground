@@ -41,7 +41,9 @@ export class Player {
     this.sprite.setOrigin(0.5, 0.98);
     const scale = PLAYER_SPRITE.displayWidth / PLAYER_SPRITE.frameWidth;
     this.sprite.setScale(scale);
-    this.sprite.setDepth(1);
+
+    // Initial position & dynamic Y-depth
+    this.setPosition(x, y);
 
     this.createAnimations(scene);
     this.playIdle();
@@ -81,10 +83,17 @@ export class Player {
     }
   }
 
-  /** Update the player's and shadow's ground position. */
+  /** Update the player's and shadow's ground position and dynamic Y-depth. */
   setPosition(x: number, y: number): void {
     this.sprite.setPosition(x, y);
     this.shadow.setPosition(x, y - 2);
+
+    // Continuous dynamic depth based on ground Y coordinate:
+    // Scale is 1 + (y / 1000) (1.000 to 1.432), well below props like gate (depth 10) and pole (depth 5).
+    // The player further down the screen (larger Y) is always rendered IN FRONT of the player higher up.
+    const dynamicDepth = 1 + y / 1000;
+    this.sprite.setDepth(dynamicDepth);
+    this.shadow.setDepth(dynamicDepth - 0.001);
   }
 
   /** Return the player's current ground-contact (feet) position. */

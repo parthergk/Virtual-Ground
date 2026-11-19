@@ -224,14 +224,15 @@ export class CollisionSystem {
    * Resolve a desired movement from (fromX, fromY) to (toX, toY).
    *
    * Sub-steps displacements (max step = radius * 0.5) to prevent tunnelling,
-   * and applies axis-aligned edge sliding when colliding diagonally.
+   * applies axis-aligned edge sliding when colliding diagonally, and avoids other entities.
    */
   resolveMovement(
     fromX: number,
     fromY: number,
     toX: number,
     toY: number,
-    radius: number
+    radius: number,
+    obstacles?: { x: number; y: number; radius?: number }[]
   ): { x: number; y: number } {
     const totalDx = toX - fromX;
     const totalDy = toY - fromY;
@@ -249,16 +250,32 @@ export class CollisionSystem {
     let curX = fromX;
     let curY = fromY;
 
+    // Check if (x, y) is clear of obstacle entities (e.g. other players)
+    const isClearOfObstacles = (x: number, y: number): boolean => {
+      if (!obstacles || obstacles.length === 0) return true;
+      for (const obs of obstacles) {
+        const minDistance = radius + (obs.radius ?? radius);
+        if (Math.hypot(x - obs.x, y - obs.y) < minDistance) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const isStepValid = (x: number, y: number): boolean => {
+      return this.isWalkable(x, y, radius) && isClearOfObstacles(x, y);
+    };
+
     for (let i = 0; i < steps; i++) {
       const nextX = curX + stepDx;
       const nextY = curY + stepDy;
 
-      if (this.isWalkable(nextX, nextY, radius)) {
+      if (isStepValid(nextX, nextY)) {
         curX = nextX;
         curY = nextY;
-      } else if (stepDx !== 0 && this.isWalkable(nextX, curY, radius)) {
+      } else if (stepDx !== 0 && isStepValid(nextX, curY)) {
         curX = nextX;
-      } else if (stepDy !== 0 && this.isWalkable(curX, nextY, radius)) {
+      } else if (stepDy !== 0 && isStepValid(curX, nextY)) {
         curY = nextY;
       } else {
         break;
