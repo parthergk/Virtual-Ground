@@ -31,6 +31,7 @@ export default function Home() {
   const [activeCharacter, setActiveCharacter] = useState<CharacterConfig | null>(
     null
   );
+  const [userCode, setUserCode] = useState<string>("");
 
   useEffect(() => {
     const checkSavedCode = async () => {
@@ -49,6 +50,7 @@ export default function Home() {
 
         const data = await res.json();
         if (res.ok && data.valid && data.character) {
+          setUserCode(data.code || savedCode);
           setActiveCharacter(data.character);
           setAuthStatus("authenticated");
         } else {
@@ -70,12 +72,14 @@ export default function Home() {
     _assignedTo: string
   ) => {
     localStorage.setItem(STORAGE_KEY, code);
+    setUserCode(code);
     setActiveCharacter(character);
     setAuthStatus("authenticated");
   };
 
   const handleExitToGate = () => {
     localStorage.removeItem(STORAGE_KEY);
+    setUserCode("");
     setActiveCharacter(null);
     setAuthStatus("unauthenticated");
   };
@@ -99,6 +103,7 @@ export default function Home() {
         <GameContainer
           key={activeCharacter.id}
           activeCharacter={activeCharacter}
+          userCode={userCode}
           onExitToGate={handleExitToGate}
         />
       )}

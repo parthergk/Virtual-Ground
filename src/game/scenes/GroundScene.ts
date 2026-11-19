@@ -1,6 +1,9 @@
 import * as Phaser from "phaser";
 import { ASSETS, MAP, GATE, LIGHT_POLE, PLAYER_SPRITE, MOVEMENT } from "../config";
 import { Player } from "../entities/Player";
+import { RemotePlayer } from "../entities/RemotePlayer";
+import { NetworkManager } from "../network/NetworkManager";
+import { CHARACTERS } from "@/config/characters";
 import {
   CollisionMapData,
   CollisionSystem,
@@ -12,7 +15,7 @@ import { Direction, MovementSystem } from "../systems/MovementSystem";
  *
  * Visual hierarchy:
  * - Background at depth -1
- * - Player and shadow at depth 0 and 1
+ * - Players and shadows at depth 0 and 1
  * - Light pole in right front corner at depth 5 (base blocks movement on surface)
  * - Gate archway at depth 10 (pillar bases block movement on surface, player walks under arch)
  */
@@ -21,7 +24,13 @@ export class GroundScene extends Phaser.Scene {
   private collisionSystem!: CollisionSystem;
   private movementSystem!: MovementSystem;
   private wasMoving = false;
+
   private activeCharacter!: { id: string; spriteUrl: string; name?: string };
+  private playerCode!: string;
+
+  // Real-time multiplayer state
+  private remotePlayers = new Map<string, RemotePlayer>();
+  private networkManager: NetworkManager | null = null;
 
   constructor() {
     super({ key: "GroundScene" });
@@ -32,11 +41,8 @@ export class GroundScene extends Phaser.Scene {
       | { id: string; spriteUrl: string; name?: string }
       | undefined;
 
-    this.activeCharacter = registryChar || {
-      id: "player",
-      spriteUrl: ASSETS.characters.player,
-      name: "Aarav",
-    };
+    this.activeCharacter = registryChar || CHARACTERS.char_1;
+    this.playerCode = (this.registry.get("code") as string) || "GROUND-01";
   }
 
   preload(): void {
@@ -45,10 +51,12 @@ export class GroundScene extends Phaser.Scene {
     this.load.image("light-pole", ASSETS.maps.lightPole);
     this.load.json("collision-map", ASSETS.maps.collision);
 
-    // Preload active character spritesheet
-    this.load.spritesheet(this.activeCharacter.id, this.activeCharacter.spriteUrl, {
-      frameWidth: PLAYER_SPRITE.frameWidth,
-      frameHeight: PLAYER_SPRITE.frameHeight,
+    // Preload ALL configured characters so remote players render instantly
+    Object.values(CHARACTERS).forEach((char) => {
+      this.load.spritesheet(char.id, char.spriteUrl, {
+        frameWidth: PLAYER_SPRITE.frameWidth,
+        frameHeight: PLAYER_SPRITE.frameHeight,
+      });
     });
 
     this.load.image("shadow", ASSETS.characters.shadow);
@@ -84,7 +92,7 @@ export class GroundScene extends Phaser.Scene {
     this.movementSystem = new MovementSystem();
     this.movementSystem.init(this);
 
-    // Spawn player with active character skin
+    // Spawn local player with active character skin
     const spawn = this.collisionSystem.getSpawnPoint();
     const facingDir = (spawn.facing as Direction) || "up";
     this.player = new Player(
@@ -94,6 +102,62 @@ export class GroundScene extends Phaser.Scene {
       facingDir,
       this.activeCharacter.id
     );
+
+    // Initialize Real-time Network Manager
+    this.networkManager = new NetworkManager({
+      onCurrentPlayers: (players) => {
+        players.forEach((p) => {
+          if (p.id !== this.playerCode && !this.remotePlayers.has(p.id)) {
+            const rp = new RemotePlayer(
+              this,
+              p.id,
+              p.characterId,
+              p.x,
+              p.y,
+              p.direction
+            );
+            if (p.moving) {
+              rp.setTargetPosition(p.x, p.y, p.direction, true);
+            }
+            this.remotePlayers.set(p.id, rp);
+          }
+        });
+      },
+      onPlayerJoined: (p) => {
+        if (p.id !== this.playerCode && !this.remotePlayers.has(p.id)) {
+          const rp = new RemotePlayer(
+            this,
+            p.id,
+            p.characterId,
+            p.x,
+            p.y,
+            p.direction
+          );
+          this.remotePlayers.set(p.id, rp);
+        }
+      },
+      onPlayerMoved: (p) => {
+        const rp = this.remotePlayers.get(p.id);
+        if (rp) {
+          rp.setTargetPosition(p.x, p.y, p.direction, p.moving);
+        }
+      },
+      onPlayerLeft: ({ id }) => {
+        const rp = this.remotePlayers.get(id);
+        if (rp) {
+          rp.destroy();
+          this.remotePlayers.delete(id);
+        }
+      },
+    });
+
+    this.networkManager.connect({
+      code: this.playerCode,
+      characterId: this.activeCharacter.id,
+      x: spawn.x,
+      y: spawn.y,
+      direction: facingDir,
+    });
 
     // Setup responsive camera
     this.cameras.main.setBounds(0, 0, MAP.width, MAP.height);
@@ -161,9 +225,20 @@ export class GroundScene extends Phaser.Scene {
       this.player.setPosition(resolved.x, resolved.y);
       this.player.walk(direction);
       this.wasMoving = true;
+
+      // Broadcast position to other players
+      this.networkManager?.sendMovement(resolved.x, resolved.y, direction, true);
     } else if (this.wasMoving) {
       this.player.playIdle();
       this.wasMoving = false;
+
+      // Broadcast idle state immediately to other players
+      this.networkManager?.sendMovement(pos.x, pos.y, this.player.getFacing(), false);
+    }
+
+    // Update position interpolation and walk/idle animation for all remote players
+    for (const rp of this.remotePlayers.values()) {
+      rp.update(delta);
     }
   }
 
@@ -171,5 +246,12 @@ export class GroundScene extends Phaser.Scene {
     this.scale?.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     this.movementSystem?.destroy(this);
     this.player?.destroy();
+
+    // Clean up network connection and remote player sprites
+    this.networkManager?.disconnect();
+    this.networkManager = null;
+
+    this.remotePlayers.forEach((rp) => rp.destroy());
+    this.remotePlayers.clear();
   }
 }

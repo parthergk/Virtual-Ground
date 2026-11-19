@@ -7,6 +7,7 @@ import type { CharacterConfig } from "@/config/characters";
 
 interface GameContainerProps {
   activeCharacter?: CharacterConfig;
+  userCode?: string;
   onExitToGate?: () => void;
 }
 
@@ -23,6 +24,7 @@ interface GameContainerProps {
  */
 export default function GameContainer({
   activeCharacter,
+  userCode,
   onExitToGate,
 }: GameContainerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -75,7 +77,10 @@ export default function GameContainer({
           PhaserLib,
           containerRef.current,
           [GroundScene],
-          activeCharacter ? { character: activeCharacter } : undefined
+          {
+            character: activeCharacter,
+            code: userCode || activeCharacter?.id || "GROUND-01",
+          }
         );
         const game = new PhaserLib.Game(config);
         gameRef.current = game;
