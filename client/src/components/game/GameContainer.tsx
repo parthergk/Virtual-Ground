@@ -1,8 +1,9 @@
 "use client";
 
 import type * as PhaserType from "phaser";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import MobileControls from "./MobileControls";
+import GameTopBar, { EMOTE_LIST } from "./GameTopBar";
 import type { CharacterConfig } from "@/config/characters";
 
 interface GameContainerProps {
@@ -14,13 +15,14 @@ interface GameContainerProps {
 /**
  * GameContainer — mounts the Phaser game instance into a DOM element.
  *
- * Responsiveness & Mobile features:
- * - Detects mobile portrait orientation and displays a friendly landscape prompt.
- * - Observes parent container size via ResizeObserver to trigger scale.refresh()
- *   when orientation changes, devtools toggle, or window resizes.
- * - Handles errors gracefully with user-visible diagnostics on mobile.
- * - Prevents double-init during React development / hot reload.
- * - Cleans up instances and observers on unmount.
+ * Architecture:
+ * - GameTopBar: Fixed top-right action bar (Proximity Voice Mic, Emote Tray, Exit)
+ *   rendered reliably across desktop and mobile.
+ * - MobileControls: Touch D-pad rendered strictly on touch-capable devices.
+ * - Keyboard shortcuts on desktop:
+ *   - 'M': toggle microphone mute/unmute
+ *   - 'E': toggle emote tray
+ *   - '1' to '8': send instant emote
  */
 export default function GameContainer({
   activeCharacter,
@@ -34,25 +36,52 @@ export default function GameContainer({
   const [dismissPortraitPrompt, setDismissPortraitPrompt] = useState<boolean>(false);
   const [showExitConfirm, setShowExitConfirm] = useState<boolean>(false);
 
-  // Proximity Voice & Emotes React State
+  // Proximity Voice & Emotes State
   const [isMuted, setIsMuted] = useState(true);
-  const [showDesktopEmotes, setShowDesktopEmotes] = useState(false);
+  const [showEmotes, setShowEmotes] = useState(false);
 
-  const handleToggleMic = () => {
+  const handleToggleMic = useCallback(() => {
     gameRef.current?.events.emit("toggle-mic", (muted: boolean) => {
       setIsMuted(muted);
     });
-  };
+  }, []);
 
-  const handleSendEmote = (emote: string) => {
+  const handleSendEmote = useCallback((emote: string) => {
     gameRef.current?.events.emit("trigger-emote", emote);
-  };
+  }, []);
+
+  // Desktop keyboard shortcuts: 'M' for Mic, 'E' for Emotes, '1-8' for direct emotes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (e.key === "m" || e.key === "M") {
+        handleToggleMic();
+      } else if (e.key === "e" || e.key === "E") {
+        setShowEmotes((prev) => !prev);
+      } else if (e.key >= "1" && e.key <= "8") {
+        const idx = parseInt(e.key, 10) - 1;
+        if (EMOTE_LIST[idx]) {
+          handleSendEmote(EMOTE_LIST[idx]);
+          setShowEmotes(false);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleToggleMic, handleSendEmote]);
 
   // Detect mobile portrait orientation
   useEffect(() => {
     const checkOrientation = () => {
       if (typeof window !== "undefined") {
-        const portrait = window.innerHeight > window.innerWidth && window.innerWidth < 1024;
+        const portrait =
+          window.innerHeight > window.innerWidth && window.innerWidth < 1024;
         setIsPortrait(portrait);
       }
     };
@@ -139,8 +168,12 @@ export default function GameContainer({
     return (
       <div className="flex flex-col items-center justify-center w-full h-full p-6 text-center text-white bg-black">
         <div className="text-red-400 text-3xl mb-3">⚠</div>
-        <p className="text-base font-semibold text-red-300 mb-2">Unable to load Virtual Ground</p>
-        <p className="text-xs text-neutral-400 font-mono mb-4 max-w-xs">{initError}</p>
+        <p className="text-base font-semibold text-red-300 mb-2">
+          Unable to load Virtual Ground
+        </p>
+        <p className="text-xs text-neutral-400 font-mono mb-4 max-w-xs">
+          {initError}
+        </p>
         <button
           onClick={() => window.location.reload()}
           className="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 rounded text-white transition-colors"
@@ -160,99 +193,119 @@ export default function GameContainer({
         id="game-container"
       />
 
-      {/* Mobile D-pad + Voice Mic + Emote tray + Exit button overlay */}
-      <MobileControls
-        onExit={() => setShowExitConfirm(true)}
-        onToggleMic={handleToggleMic}
+      {/* Top Action Bar (Mic, Emotes Tray, Exit) — Always visible on Desktop & Mobile */}
+      <GameTopBar
         isMuted={isMuted}
+        onToggleMic={handleToggleMic}
+        showEmotes={showEmotes}
+        onToggleEmotes={() => setShowEmotes((prev) => !prev)}
         onSendEmote={handleSendEmote}
+        onExit={() => setShowExitConfirm(true)}
       />
 
-      {/* Desktop top-right action bar (Voice Mic, Emotes, Exit) */}
-      <div className="hidden sm:flex absolute top-3 right-3 z-30 items-center gap-2">
-        <button
-          onClick={handleToggleMic}
-          className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-md backdrop-blur-sm cursor-pointer flex items-center gap-1.5 ${
-            isMuted
-              ? "bg-black/60 border-neutral-700/80 text-neutral-300 hover:text-white"
-              : "bg-emerald-950/70 border-emerald-500 text-emerald-300 shadow-emerald-900/30"
-          }`}
-          title={isMuted ? "Click to enable proximity voice" : "Mute microphone"}
-        >
-          <span>{isMuted ? "🔇" : "🎙️"}</span>
-          <span>{isMuted ? "Mic Off" : "Mic On"}</span>
-        </button>
-
-        <button
-          onClick={() => setShowDesktopEmotes((prev) => !prev)}
-          className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-md backdrop-blur-sm cursor-pointer flex items-center gap-1 ${
-            showDesktopEmotes
-              ? "bg-amber-950/70 border-amber-500 text-amber-300"
-              : "bg-black/60 border-neutral-700/80 text-neutral-300 hover:text-white"
-          }`}
-          title="Send an Emote"
-        >
-          <span>😊</span>
-        </button>
-
-        <button
-          onClick={() => setShowExitConfirm(true)}
-          className="px-3 py-1.5 rounded-lg bg-black/60 hover:bg-black/90 border border-neutral-700/80 text-xs font-semibold text-neutral-300 hover:text-white transition-all shadow-md backdrop-blur-sm cursor-pointer"
-        >
-          Exit / Switch
-        </button>
-      </div>
-
-      {/* Desktop Emote Tray Popover */}
-      {showDesktopEmotes && (
-        <div className="hidden sm:grid grid-cols-4 gap-2 p-2.5 rounded-xl bg-neutral-950/95 border border-amber-500/40 shadow-2xl backdrop-blur-md absolute top-12 right-16 z-30">
-          {["🙏", "👋", "❤️", "😂", "🔥", "🪔", "👏", "😮"].map((emote) => (
-            <button
-              key={emote}
-              onClick={() => {
-                handleSendEmote(emote);
-                setShowDesktopEmotes(false);
-              }}
-              className="w-9 h-9 flex items-center justify-center text-lg rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 hover:border-amber-400/50 transition-all cursor-pointer hover:scale-105 active:scale-95"
-            >
-              {emote}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Touch D-pad Overlay (Only visible on touch devices) */}
+      <MobileControls />
 
       {/* Exit / Switch Character Modal */}
       {showExitConfirm && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-xs rounded-xl bg-neutral-900 border border-neutral-800 p-5 shadow-2xl text-center text-white space-y-4">
-            <h3 className="text-base font-bold text-amber-200">Ramlila Ground</h3>
-            <p className="text-xs text-neutral-300">
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.85)",
+            backdropFilter: "blur(6px)",
+            padding: 16,
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              borderRadius: 16,
+              background: "#0f0f10",
+              border: "1px solid #27272a",
+              padding: 24,
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.75)",
+              textAlign: "center",
+              color: "#fff",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: "#fef08a",
+                marginBottom: 4,
+              }}
+            >
+              Ramlila Ground
+            </h3>
+            <p style={{ fontSize: 13, color: "#a1a1aa", marginBottom: 20 }}>
               Playing as{" "}
-              <span className="font-semibold text-amber-400">
+              <span style={{ fontWeight: 600, color: "#fbbf24" }}>
                 {activeCharacter?.name || "Player"}
               </span>
             </p>
-            <div className="space-y-2 pt-1">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {onExitToGate && (
                 <button
+                  type="button"
                   onClick={() => {
                     setShowExitConfirm(false);
                     onExitToGate();
                   }}
-                  className="w-full py-2.5 px-3 rounded-lg text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black transition-colors cursor-pointer"
+                  style={{
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: "#d97706",
+                    color: "#000",
+                    border: "none",
+                    cursor: "pointer",
+                    transition: "background 0.15s ease",
+                  }}
                 >
                   Switch Character / Code
                 </button>
               )}
               <button
+                type="button"
                 onClick={() => window.location.reload()}
-                className="w-full py-2 px-3 rounded-lg text-xs font-semibold bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors cursor-pointer"
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  background: "#27272a",
+                  color: "#e4e4e7",
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "background 0.15s ease",
+                }}
               >
                 Reload Ground
               </button>
               <button
+                type="button"
                 onClick={() => setShowExitConfirm(false)}
-                className="w-full py-1.5 text-xs text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                style={{
+                  width: "100%",
+                  padding: "8px 14px",
+                  fontSize: 12,
+                  color: "#a1a1aa",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                }}
               >
                 Resume Exploring
               </button>
@@ -263,17 +316,64 @@ export default function GameContainer({
 
       {/* Landscape Rotation Suggestion Overlay (Mobile Portrait Only) */}
       {isPortrait && !dismissPortraitPrompt && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-sm p-6 text-center text-white transition-opacity">
-          <div className="w-14 h-14 mb-4 text-amber-400 animate-bounce flex items-center justify-center text-3xl">
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.85)",
+            backdropFilter: "blur(6px)",
+            padding: 24,
+            textAlign: "center",
+            color: "#fff",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 36,
+              marginBottom: 16,
+            }}
+          >
             🔄
           </div>
-          <h2 className="text-lg font-bold text-amber-300 mb-1">Rotate to Landscape</h2>
-          <p className="text-xs text-neutral-300 max-w-xs mb-5 leading-relaxed">
-            Please turn your phone sideways (Landscape mode) to view the entire ground.
+          <h2
+            style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: "#fcd34d",
+              marginBottom: 8,
+            }}
+          >
+            Rotate to Landscape
+          </h2>
+          <p
+            style={{
+              fontSize: 13,
+              color: "#d4d4d8",
+              maxWidth: 280,
+              marginBottom: 20,
+              lineHeight: 1.5,
+            }}
+          >
+            Please turn your phone sideways (Landscape mode) to view the entire
+            ground.
           </p>
           <button
+            type="button"
             onClick={() => setDismissPortraitPrompt(true)}
-            className="text-xs text-neutral-400 hover:text-white underline underline-offset-4 py-1 px-3"
+            style={{
+              fontSize: 12,
+              color: "#a1a1aa",
+              textDecoration: "underline",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "6px 12px",
+            }}
           >
             Continue in portrait anyway
           </button>
