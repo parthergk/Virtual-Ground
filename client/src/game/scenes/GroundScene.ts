@@ -3,6 +3,7 @@ import { ASSETS, MAP, GATE, LIGHT_POLE, PLAYER_SPRITE, MOVEMENT } from "../confi
 import { Player } from "../entities/Player";
 import { RemotePlayer } from "../entities/RemotePlayer";
 import { NetworkManager } from "../network/NetworkManager";
+import { VoiceManager } from "../network/VoiceManager";
 import { CHARACTERS } from "@/config/characters";
 import {
   CollisionMapData,
@@ -31,6 +32,7 @@ export class GroundScene extends Phaser.Scene {
   // Real-time multiplayer state
   private remotePlayers = new Map<string, RemotePlayer>();
   private networkManager: NetworkManager | null = null;
+  private voiceManager: VoiceManager | null = null;
 
   constructor() {
     super({ key: "GroundScene" });
@@ -124,6 +126,7 @@ export class GroundScene extends Phaser.Scene {
               rp.setTargetPosition(p.x, p.y, p.direction, true);
             }
             this.remotePlayers.set(p.id, rp);
+            this.voiceManager?.connectToPeer(p.id);
           }
         });
       },
@@ -138,6 +141,7 @@ export class GroundScene extends Phaser.Scene {
             p.direction
           );
           this.remotePlayers.set(p.id, rp);
+          this.voiceManager?.connectToPeer(p.id);
         }
       },
       onPlayerMoved: (p) => {
@@ -152,6 +156,19 @@ export class GroundScene extends Phaser.Scene {
           rp.destroy();
           this.remotePlayers.delete(id);
         }
+        this.voiceManager?.disconnectPeer(id);
+      },
+      onPlayerEmoted: ({ id, emote }) => {
+        const rp = this.remotePlayers.get(id);
+        if (rp) {
+          rp.showEmote(emote);
+        }
+      },
+      onPlayerSpeaking: ({ id, speaking }) => {
+        const rp = this.remotePlayers.get(id);
+        if (rp) {
+          rp.setSpeaking(speaking);
+        }
       },
     });
 
@@ -162,6 +179,24 @@ export class GroundScene extends Phaser.Scene {
       y: spawnY,
       direction: facingDir,
     });
+
+    // Initialize Proximity Voice Manager with WebRTC Spatial Audio
+    this.voiceManager = new VoiceManager(
+      (speaking) => {
+        this.player.setSpeaking(speaking);
+      },
+      (peerId, speaking) => {
+        this.remotePlayers.get(peerId)?.setSpeaking(speaking);
+      }
+    );
+    const sock = this.networkManager.getSocket();
+    if (sock) {
+      this.voiceManager.init(sock, this.playerCode);
+    }
+
+    // Register React UI control event listeners
+    this.game.events.on("trigger-emote", this.handleTriggerEmote, this);
+    this.game.events.on("toggle-mic", this.handleToggleMic, this);
 
     // Setup responsive camera
     this.cameras.main.setBounds(0, 0, MAP.width, MAP.height);
@@ -250,12 +285,38 @@ export class GroundScene extends Phaser.Scene {
     for (const rp of this.remotePlayers.values()) {
       rp.update(delta);
     }
+
+    // Update Web Audio proximity rolloff based on real-time distances
+    const remotePosMap = new Map<string, { x: number; y: number }>();
+    for (const [id, rp] of this.remotePlayers.entries()) {
+      remotePosMap.set(id, rp.getPosition());
+    }
+    this.voiceManager?.updateSpatialAudio(pos, remotePosMap);
+  }
+
+  private handleTriggerEmote(emote: string): void {
+    this.player.showEmote(emote);
+    this.networkManager?.sendEmote(emote);
+  }
+
+  private handleToggleMic(callback?: (isMuted: boolean) => void): void {
+    if (this.voiceManager) {
+      const isMuted = this.voiceManager.toggleMute();
+      callback?.(isMuted);
+    }
   }
 
   private handleShutdown(): void {
+    this.game.events.off("trigger-emote", this.handleTriggerEmote, this);
+    this.game.events.off("toggle-mic", this.handleToggleMic, this);
+
     this.scale?.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
     this.movementSystem?.destroy(this);
     this.player?.destroy();
+
+    // Clean up voice manager
+    this.voiceManager?.cleanup();
+    this.voiceManager = null;
 
     // Clean up network connection and remote player sprites
     this.networkManager?.disconnect();

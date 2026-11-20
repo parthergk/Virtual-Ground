@@ -1,10 +1,11 @@
 import * as Phaser from "phaser";
 import { PLAYER_SPRITE } from "../config";
 import { Direction } from "../systems/MovementSystem";
+import { EmoteBubble } from "./EmoteBubble";
 
 /**
  * Player entity — manages the player sprite, ground shadow, animations,
- * and movement/facing state.
+ * movement/facing state, and emote/voice indicators.
  *
  * The sprite's origin is (0.5, 1) — horizontally centred and vertically
  * anchored at the feet. Thus (x, y) represents the player's ground-contact
@@ -18,6 +19,7 @@ export class Player {
 
   private facing: Direction;
   private characterKey: string;
+  private emoteManager: EmoteBubble;
 
   constructor(
     scene: Phaser.Scene,
@@ -28,6 +30,7 @@ export class Player {
   ) {
     this.facing = facing;
     this.characterKey = characterKey;
+    this.emoteManager = new EmoteBubble(scene);
 
     // Shadow sits slightly below the player sprite in depth order
     this.shadow = scene.add.image(x, y, "shadow");
@@ -94,6 +97,31 @@ export class Player {
     const dynamicDepth = 1 + y / 1000;
     this.sprite.setDepth(dynamicDepth);
     this.shadow.setDepth(dynamicDepth - 0.001);
+    this.emoteManager.updatePosition(x, y, dynamicDepth);
+  }
+
+  /**
+   * Display a floating emote reaction bubble over the player's head.
+   */
+  showEmote(emote: string): void {
+    this.emoteManager.showEmote(
+      this.sprite.x,
+      this.sprite.y,
+      this.sprite.depth,
+      emote
+    );
+  }
+
+  /**
+   * Show/hide active speaking voice indicator over player's head.
+   */
+  setSpeaking(isSpeaking: boolean): void {
+    this.emoteManager.setSpeaking(
+      this.sprite.x,
+      this.sprite.y,
+      this.sprite.depth,
+      isSpeaking
+    );
   }
 
   /** Return the player's current ground-contact (feet) position. */
@@ -119,6 +147,7 @@ export class Player {
 
   /** Clean up Phaser game objects and animations. */
   destroy(): void {
+    this.emoteManager?.destroy();
     this.shadow?.destroy();
     this.sprite?.destroy();
   }

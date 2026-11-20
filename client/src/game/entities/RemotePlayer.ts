@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import { PLAYER_SPRITE } from "../config";
 import { Direction } from "../systems/MovementSystem";
+import { EmoteBubble } from "./EmoteBubble";
 
 /**
  * RemotePlayer — manages another connected player on the ground.
@@ -9,6 +10,7 @@ import { Direction } from "../systems/MovementSystem";
  * - Clean pixel-art rendering with shadow (no name tag above head).
  * - Smooth linear interpolation (lerp) to target network coordinates.
  * - Synchronized 4-directional walk and idle animations.
+ * - Emote speech bubbles and active speaking audio indicator.
  */
 export class RemotePlayer {
   readonly id: string;
@@ -24,6 +26,7 @@ export class RemotePlayer {
 
   private facing: Direction = "down";
   private isMoving = false;
+  private emoteManager: EmoteBubble;
 
   constructor(
     scene: Phaser.Scene,
@@ -40,6 +43,7 @@ export class RemotePlayer {
     this.targetX = initialX;
     this.targetY = initialY;
     this.facing = facing;
+    this.emoteManager = new EmoteBubble(scene);
 
     // Shadow below remote player sprite
     this.shadow = scene.add.image(initialX, initialY, "shadow");
@@ -144,12 +148,37 @@ export class RemotePlayer {
     const dynamicDepth = 1 + this.currentY / 1000;
     this.sprite.setDepth(dynamicDepth);
     this.shadow.setDepth(dynamicDepth - 0.001);
+    this.emoteManager.updatePosition(this.currentX, this.currentY, dynamicDepth);
 
     if (this.isMoving) {
       this.sprite.play(`walk-${this.characterKey}-${this.facing}`, true);
     } else {
       this.sprite.play(`idle-${this.characterKey}-${this.facing}`, true);
     }
+  }
+
+  /**
+   * Display a floating emote reaction bubble over this remote player's head.
+   */
+  showEmote(emote: string): void {
+    this.emoteManager.showEmote(
+      this.currentX,
+      this.currentY,
+      this.sprite.depth,
+      emote
+    );
+  }
+
+  /**
+   * Show/hide active speaking voice indicator over this remote player's head.
+   */
+  setSpeaking(isSpeaking: boolean): void {
+    this.emoteManager.setSpeaking(
+      this.currentX,
+      this.currentY,
+      this.sprite.depth,
+      isSpeaking
+    );
   }
 
   /**
@@ -164,6 +193,7 @@ export class RemotePlayer {
   }
 
   destroy(): void {
+    this.emoteManager?.destroy();
     this.shadow?.destroy();
     this.sprite?.destroy();
   }

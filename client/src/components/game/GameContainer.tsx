@@ -34,6 +34,20 @@ export default function GameContainer({
   const [dismissPortraitPrompt, setDismissPortraitPrompt] = useState<boolean>(false);
   const [showExitConfirm, setShowExitConfirm] = useState<boolean>(false);
 
+  // Proximity Voice & Emotes React State
+  const [isMuted, setIsMuted] = useState(true);
+  const [showDesktopEmotes, setShowDesktopEmotes] = useState(false);
+
+  const handleToggleMic = () => {
+    gameRef.current?.events.emit("toggle-mic", (muted: boolean) => {
+      setIsMuted(muted);
+    });
+  };
+
+  const handleSendEmote = (emote: string) => {
+    gameRef.current?.events.emit("trigger-emote", emote);
+  };
+
   // Detect mobile portrait orientation
   useEffect(() => {
     const checkOrientation = () => {
@@ -146,11 +160,41 @@ export default function GameContainer({
         id="game-container"
       />
 
-      {/* Mobile D-pad + Exit button overlay */}
-      <MobileControls onExit={() => setShowExitConfirm(true)} />
+      {/* Mobile D-pad + Voice Mic + Emote tray + Exit button overlay */}
+      <MobileControls
+        onExit={() => setShowExitConfirm(true)}
+        onToggleMic={handleToggleMic}
+        isMuted={isMuted}
+        onSendEmote={handleSendEmote}
+      />
 
-      {/* Desktop subtle top-right exit button */}
-      <div className="hidden sm:block absolute top-3 right-3 z-30">
+      {/* Desktop top-right action bar (Voice Mic, Emotes, Exit) */}
+      <div className="hidden sm:flex absolute top-3 right-3 z-30 items-center gap-2">
+        <button
+          onClick={handleToggleMic}
+          className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-md backdrop-blur-sm cursor-pointer flex items-center gap-1.5 ${
+            isMuted
+              ? "bg-black/60 border-neutral-700/80 text-neutral-300 hover:text-white"
+              : "bg-emerald-950/70 border-emerald-500 text-emerald-300 shadow-emerald-900/30"
+          }`}
+          title={isMuted ? "Click to enable proximity voice" : "Mute microphone"}
+        >
+          <span>{isMuted ? "🔇" : "🎙️"}</span>
+          <span>{isMuted ? "Mic Off" : "Mic On"}</span>
+        </button>
+
+        <button
+          onClick={() => setShowDesktopEmotes((prev) => !prev)}
+          className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-md backdrop-blur-sm cursor-pointer flex items-center gap-1 ${
+            showDesktopEmotes
+              ? "bg-amber-950/70 border-amber-500 text-amber-300"
+              : "bg-black/60 border-neutral-700/80 text-neutral-300 hover:text-white"
+          }`}
+          title="Send an Emote"
+        >
+          <span>😊</span>
+        </button>
+
         <button
           onClick={() => setShowExitConfirm(true)}
           className="px-3 py-1.5 rounded-lg bg-black/60 hover:bg-black/90 border border-neutral-700/80 text-xs font-semibold text-neutral-300 hover:text-white transition-all shadow-md backdrop-blur-sm cursor-pointer"
@@ -158,6 +202,24 @@ export default function GameContainer({
           Exit / Switch
         </button>
       </div>
+
+      {/* Desktop Emote Tray Popover */}
+      {showDesktopEmotes && (
+        <div className="hidden sm:grid grid-cols-4 gap-2 p-2.5 rounded-xl bg-neutral-950/95 border border-amber-500/40 shadow-2xl backdrop-blur-md absolute top-12 right-16 z-30">
+          {["🙏", "👋", "❤️", "😂", "🔥", "🪔", "👏", "😮"].map((emote) => (
+            <button
+              key={emote}
+              onClick={() => {
+                handleSendEmote(emote);
+                setShowDesktopEmotes(false);
+              }}
+              className="w-9 h-9 flex items-center justify-center text-lg rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 hover:border-amber-400/50 transition-all cursor-pointer hover:scale-105 active:scale-95"
+            >
+              {emote}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Exit / Switch Character Modal */}
       {showExitConfirm && (

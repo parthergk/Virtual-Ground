@@ -27,10 +27,21 @@ function isTouchDevice(): boolean {
  */
 interface MobileControlsProps {
   onExit?: () => void;
+  onToggleMic?: () => void;
+  isMuted?: boolean;
+  onSendEmote?: (emote: string) => void;
 }
 
-export default function MobileControls({ onExit }: MobileControlsProps) {
+const EMOTE_LIST = ["🙏", "👋", "❤️", "😂", "🔥", "🪔", "👏", "😮"];
+
+export default function MobileControls({
+  onExit,
+  onToggleMic,
+  isMuted = true,
+  onSendEmote,
+}: MobileControlsProps) {
   const [visible, setVisible] = useState(false);
+  const [showEmotes, setShowEmotes] = useState(false);
 
   useEffect(() => {
     setVisible(isTouchDevice());
@@ -145,31 +156,145 @@ export default function MobileControls({ onExit }: MobileControlsProps) {
         }
       `}</style>
 
-      {/* EXIT button — top-right */}
-      <button
-        data-ctrl
-        onClick={handleExit}
+      {/* Top-Right Action Bar: Voice Mic, Emote Tray, Exit */}
+      <div
         style={{
           position: "absolute",
           right: "max(12px, env(safe-area-inset-right, 12px))",
           top: "max(12px, env(safe-area-inset-top, 12px))",
-          ...btnBase,
-          width: "auto",
-          height: "auto",
-          paddingTop: 6,
-          paddingBottom: 6,
-          paddingLeft: 14,
-          paddingRight: 14,
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.08em",
-          zIndex: 40,
-          touchAction: "manipulation",
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          zIndex: 45,
         }}
-        aria-label="Exit game"
       >
-        EXIT
-      </button>
+        {/* Proximity Voice Mic Button */}
+        {onToggleMic && (
+          <button
+            data-ctrl
+            onClick={onToggleMic}
+            style={{
+              ...btnBase,
+              width: "auto",
+              height: "auto",
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              paddingRight: 10,
+              fontSize: 14,
+              background: isMuted ? "rgba(0,0,0,0.6)" : "rgba(34,197,94,0.35)",
+              borderColor: isMuted
+                ? "rgba(255,255,255,0.2)"
+                : "rgba(34,197,94,0.85)",
+              touchAction: "manipulation",
+            }}
+            title={isMuted ? "Unmute Microphone" : "Mute Microphone"}
+            aria-label="Toggle voice chat"
+          >
+            {isMuted ? "🔇" : "🎙️"}
+          </button>
+        )}
+
+        {/* Emote Selector Toggle Button */}
+        {onSendEmote && (
+          <button
+            data-ctrl
+            onClick={() => setShowEmotes((prev) => !prev)}
+            style={{
+              ...btnBase,
+              width: "auto",
+              height: "auto",
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              paddingRight: 10,
+              fontSize: 14,
+              background: showEmotes
+                ? "rgba(245,158,11,0.3)"
+                : "rgba(0,0,0,0.6)",
+              borderColor: showEmotes
+                ? "rgba(245,158,11,0.8)"
+                : "rgba(255,255,255,0.2)",
+              touchAction: "manipulation",
+            }}
+            title="Express an Emote"
+            aria-label="Open emote tray"
+          >
+            😊
+          </button>
+        )}
+
+        {/* EXIT button */}
+        <button
+          data-ctrl
+          onClick={handleExit}
+          style={{
+            ...btnBase,
+            width: "auto",
+            height: "auto",
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 12,
+            paddingRight: 12,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            touchAction: "manipulation",
+          }}
+          aria-label="Exit game"
+        >
+          EXIT
+        </button>
+      </div>
+
+      {/* Floating Emote Tray Popover */}
+      {showEmotes && onSendEmote && (
+        <div
+          style={{
+            position: "absolute",
+            right: "max(12px, env(safe-area-inset-right, 12px))",
+            top: "calc(max(12px, env(safe-area-inset-top, 12px)) + 42px)",
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 38px)",
+            gap: 6,
+            padding: 8,
+            borderRadius: 12,
+            background: "rgba(10, 10, 10, 0.94)",
+            border: "1px solid rgba(245, 158, 11, 0.4)",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.7)",
+            zIndex: 46,
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          {EMOTE_LIST.map((emote) => (
+            <button
+              key={emote}
+              data-ctrl
+              onClick={() => {
+                onSendEmote(emote);
+                setShowEmotes(false);
+              }}
+              style={{
+                width: 38,
+                height: 38,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 18,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8,
+                cursor: "pointer",
+                touchAction: "manipulation",
+                transition: "transform 0.08s, background 0.08s",
+              }}
+              aria-label={`Send ${emote} emote`}
+            >
+              {emote}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* D-pad — bottom-right with safe-area inset */}
       <div

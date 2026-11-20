@@ -126,6 +126,46 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Handle player emote broadcast
+  socket.on("player-emote", (data) => {
+    const player = players.get(socket.id);
+    if (!player || !data || !data.emote) return;
+
+    socket.broadcast.emit("player-emoted", {
+      id: player.id,
+      emote: String(data.emote).slice(0, 30),
+    });
+  });
+
+  // Handle player speaking status (for visual wave indicator over character)
+  socket.on("player-speaking", (data) => {
+    const player = players.get(socket.id);
+    if (!player) return;
+
+    socket.broadcast.emit("player-speaking", {
+      id: player.id,
+      speaking: Boolean(data.speaking),
+    });
+  });
+
+  // WebRTC Voice Signaling (P2P Mesh with Proximity Audio)
+  socket.on("voice-signal", (data) => {
+    const player = players.get(socket.id);
+    if (!player || !data || !data.toId) return;
+
+    // Relay to the target player's socket
+    for (const [targetSocketId, targetPlayer] of players.entries()) {
+      if (targetPlayer.id === data.toId && targetSocketId !== socket.id) {
+        io.to(targetSocketId).emit("voice-signal", {
+          fromId: player.id,
+          type: data.type, // "offer" | "answer" | "candidate"
+          signal: data.signal,
+        });
+        break;
+      }
+    }
+  });
+
   // Handle player disconnect
   socket.on("disconnect", (reason) => {
     const player = players.get(socket.id);

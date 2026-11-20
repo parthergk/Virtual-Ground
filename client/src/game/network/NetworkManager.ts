@@ -15,6 +15,8 @@ export interface NetworkCallbacks {
   onPlayerJoined: (player: RemotePlayerState) => void;
   onPlayerMoved: (player: RemotePlayerState) => void;
   onPlayerLeft: (data: { id: string }) => void;
+  onPlayerEmoted?: (data: { id: string; emote: string }) => void;
+  onPlayerSpeaking?: (data: { id: string; speaking: boolean }) => void;
 }
 
 const DEFAULT_SOCKET_URL = "http://localhost:3001";
@@ -98,6 +100,14 @@ export class NetworkManager {
     this.socket.on("player-left", (data: { id: string }) => {
       this.callbacks?.onPlayerLeft(data);
     });
+
+    this.socket.on("player-emoted", (data: { id: string; emote: string }) => {
+      this.callbacks?.onPlayerEmoted?.(data);
+    });
+
+    this.socket.on("player-speaking", (data: { id: string; speaking: boolean }) => {
+      this.callbacks?.onPlayerSpeaking?.(data);
+    });
   }
 
   /**
@@ -137,6 +147,21 @@ export class NetworkManager {
         moving,
       });
     }
+  }
+
+  /**
+   * Broadcast an emote reaction to all other connected players.
+   */
+  sendEmote(emote: string): void {
+    if (!this.socket || !this.isConnected) return;
+    this.socket.emit("player-emote", { emote });
+  }
+
+  /**
+   * Get direct reference to Socket.io socket (for WebRTC voice signaling).
+   */
+  getSocket(): Socket | null {
+    return this.socket;
   }
 
   /**
