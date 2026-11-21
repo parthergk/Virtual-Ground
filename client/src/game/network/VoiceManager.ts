@@ -2,6 +2,7 @@ import {
   Room,
   RoomEvent,
   RemoteTrack,
+  RemoteAudioTrack,
   RemoteTrackPublication,
   RemoteParticipant,
   Track,
@@ -15,13 +16,14 @@ import {
  * Architecture:
  * - Real-time audio transport: LiveKit SFU (WebRTC).
  * - Room credentials obtained securely via Next.js `/api/livekit/token` API.
- * - Proximity volume attenuation: Web Audio API `GainNode` attached to each remote track.
- * - Proximity curve (configurable):
+ * - Proximity volume attenuation: Web Audio API GainNode attached to each remote track.
+ * - Proximity curve:
  *   - 0–150 px: Full volume (1.0)
  *   - 150–350 px: Linear fade (1.0 -> 0.3)
  *   - 350–500 px: Very quiet (0.3 -> 0.05)
  *   - > 500 px: Muted (0.0)
  * - Automatic active-speaker detection via LiveKit `ActiveSpeakersChanged`.
+ * - Cross-platform autoplay handling for Desktop and Mobile (iOS / Android).
  * - Clean teardown of audio graph nodes, media streams, and room connections.
  */
 
@@ -39,18 +41,17 @@ const DEFAULT_PROXIMITY: ProximityConfig = {
   mutedDist: 500,
 };
 
-interface RemoteAudioNode {
+interface RemoteTrackEntry {
   participantId: string;
-  sourceNode: MediaStreamAudioSourceNode;
-  gainNode: GainNode;
-  stream: MediaStream;
+  track: RemoteAudioTrack;
+  element: HTMLMediaElement;
 }
 
 export class VoiceManager {
   private room: Room | null = null;
   private localPlayerCode = "";
   private audioContext: AudioContext | null = null;
-  private remoteAudioNodes = new Map<string, RemoteAudioNode>();
+  private remoteTracks = new Map<string, RemoteTrackEntry>();
 
   private isMuted = true;
   private isConnected = false;
@@ -59,6 +60,7 @@ export class VoiceManager {
 
   private onSpeakingCallback: ((speaking: boolean) => void) | null = null;
   private onRemoteSpeakingCallback: ((peerId: string, speaking: boolean) => void) | null = null;
+  private userInteractionCleanup: (() => void) | null = null;
 
   constructor(
     onSpeaking?: (speaking: boolean) => void,
@@ -68,6 +70,58 @@ export class VoiceManager {
     if (onSpeaking) this.onSpeakingCallback = onSpeaking;
     if (onRemoteSpeaking) this.onRemoteSpeakingCallback = onRemoteSpeaking;
     if (config) this.proximityConfig = { ...DEFAULT_PROXIMITY, ...config };
+
+    this.setupGlobalUnlockListener();
+  }
+
+  /**
+   * Unlock browser audio autoplay restrictions on the first user interaction (touch/click/key).
+   */
+  private setupGlobalUnlockListener(): void {
+    if (typeof window === "undefined") return;
+
+    const onUserInteraction = () => {
+      this.unlockAudio().catch(() => {});
+      removeListeners();
+    };
+
+    const removeListeners = () => {
+      window.removeEventListener("pointerdown", onUserInteraction);
+      window.removeEventListener("touchstart", onUserInteraction);
+      window.removeEventListener("keydown", onUserInteraction);
+      this.userInteractionCleanup = null;
+    };
+
+    window.addEventListener("pointerdown", onUserInteraction, { passive: true });
+    window.addEventListener("touchstart", onUserInteraction, { passive: true });
+    window.addEventListener("keydown", onUserInteraction, { passive: true });
+
+    this.userInteractionCleanup = removeListeners;
+  }
+
+  /**
+   * Resume AudioContext and trigger LiveKit startAudio() inside user gesture context.
+   */
+  public async unlockAudio(): Promise<void> {
+    this.initAudioContext();
+
+    if (this.audioContext && this.audioContext.state === "suspended") {
+      try {
+        await this.audioContext.resume();
+        console.log("[VoiceManager] Web Audio Context resumed successfully.");
+      } catch (err) {
+        console.warn("[VoiceManager] AudioContext resume failed:", err);
+      }
+    }
+
+    if (this.room && !this.room.canPlaybackAudio) {
+      try {
+        await this.room.startAudio();
+        console.log("[VoiceManager] LiveKit room.startAudio() unlocked audio playback.");
+      } catch (err) {
+        console.warn("[VoiceManager] LiveKit room.startAudio() error:", err);
+      }
+    }
   }
 
   /**
@@ -103,10 +157,10 @@ export class VoiceManager {
 
       this.isConfigured = true;
 
-      // Initialize Web Audio Context (lazy created on user gesture or room init)
+      // Lazy-initialize Web Audio Context
       this.initAudioContext();
 
-      // Create LiveKit Room
+      // Create LiveKit Room instance with optimized audio defaults
       this.room = new Room({
         adaptiveStream: true,
         dynacast: true,
@@ -120,6 +174,7 @@ export class VoiceManager {
       this.setupRoomEvents();
 
       // Connect to LiveKit SFU
+      console.log(`[VoiceManager] Connecting to LiveKit SFU: ${data.url}...`);
       await this.room.connect(data.url, data.token);
       this.isConnected = true;
       console.log(`[VoiceManager] Connected to LiveKit voice room "${data.room}" as "${data.identity}"`);
@@ -127,6 +182,16 @@ export class VoiceManager {
       // Start muted by default
       await this.room.localParticipant.setMicrophoneEnabled(false);
       this.isMuted = true;
+
+      // Handle any existing audio tracks from participants who joined earlier
+      this.room.remoteParticipants.forEach((participant) => {
+        participant.trackPublications.forEach((pub) => {
+          if (pub.isSubscribed && pub.track && pub.track.kind === Track.Kind.Audio) {
+            console.log(`[VoiceManager] Found pre-existing audio track for ${participant.identity}`);
+            this.attachRemoteAudioTrack(participant.identity, pub.track as RemoteAudioTrack);
+          }
+        });
+      });
 
     } catch (err) {
       console.error("[VoiceManager] Failed to connect to LiveKit:", err);
@@ -149,13 +214,13 @@ export class VoiceManager {
   private setupRoomEvents(): void {
     if (!this.room) return;
 
-    // Handle remote participant audio tracks
+    // Handle incoming remote audio tracks
     this.room.on(
       RoomEvent.TrackSubscribed,
       (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         if (track.kind === Track.Kind.Audio) {
           console.log(`[VoiceManager] Subscribed to audio track from: ${participant.identity}`);
-          this.attachRemoteAudioTrack(participant.identity, track);
+          this.attachRemoteAudioTrack(participant.identity, track as RemoteAudioTrack);
         }
       }
     );
@@ -180,70 +245,82 @@ export class VoiceManager {
       this.onSpeakingCallback?.(isLocalSpeaking);
 
       // Remote players speaking
-      for (const [peerId] of this.remoteAudioNodes.entries()) {
+      for (const peerId of this.remoteTracks.keys()) {
         const isPeerSpeaking = speakerIdentities.has(peerId);
         this.onRemoteSpeakingCallback?.(peerId, isPeerSpeaking);
       }
     });
 
+    this.room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+      console.log(`[VoiceManager] Audio playback permitted: ${this.room?.canPlaybackAudio}`);
+    });
+
     this.room.on(RoomEvent.Disconnected, () => {
       console.log("[VoiceManager] Disconnected from LiveKit voice room.");
       this.isConnected = false;
-      this.cleanupAllNodes();
+      this.cleanupAllTracks();
     });
   }
 
   /**
    * Route remote participant audio through Web Audio GainNode for proximity attenuation.
+   * Also attaches the HTMLMediaElement to ensure the browser's WebRTC engine actively decodes RTP packets.
    */
-  private attachRemoteAudioTrack(participantId: string, track: RemoteTrack): void {
+  private attachRemoteAudioTrack(participantId: string, track: RemoteAudioTrack): void {
     this.initAudioContext();
-    if (!this.audioContext || !track.mediaStreamTrack) return;
-
-    // Remove existing node for this participant if any
     this.detachRemoteAudioTrack(participantId);
 
     try {
-      const stream = new MediaStream([track.mediaStreamTrack]);
-      const sourceNode = this.audioContext.createMediaStreamSource(stream);
-      const gainNode = this.audioContext.createGain();
+      // Connect to Web Audio context for GainNode processing
+      if (this.audioContext) {
+        track.setAudioContext(this.audioContext);
+      }
 
-      // Start with default volume
-      gainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime);
+      // CRITICAL: track.attach() creates and mounts an <audio> element.
+      // In WebRTC (Chrome, Safari, Android/iOS), remote audio tracks do NOT decode or pull
+      // frames unless attached to an active media element.
+      const element = track.attach();
+      element.style.display = "none";
+      element.setAttribute("data-participant-id", participantId);
 
-      sourceNode.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
+      if (typeof document !== "undefined" && !document.body.contains(element)) {
+        document.body.appendChild(element);
+      }
 
-      this.remoteAudioNodes.set(participantId, {
+      // Attempt immediate play (will be unlocked if gesture already occurred)
+      element.play().catch(() => {});
+
+      this.remoteTracks.set(participantId, {
         participantId,
-        sourceNode,
-        gainNode,
-        stream,
+        track,
+        element,
       });
 
-      console.log(`[VoiceManager] Web Audio GainNode attached for ${participantId}`);
+      console.log(`[VoiceManager] Remote audio track attached successfully for: ${participantId}`);
     } catch (err) {
-      console.error(`[VoiceManager] Error setting up Web Audio for ${participantId}:`, err);
+      console.error(`[VoiceManager] Error attaching audio track for ${participantId}:`, err);
     }
   }
 
   private detachRemoteAudioTrack(participantId: string): void {
-    const node = this.remoteAudioNodes.get(participantId);
-    if (!node) return;
+    const entry = this.remoteTracks.get(participantId);
+    if (!entry) return;
 
     try {
-      node.sourceNode.disconnect();
-      node.gainNode.disconnect();
+      entry.track.detach(entry.element);
+      if (entry.element.parentNode) {
+        entry.element.parentNode.removeChild(entry.element);
+      }
     } catch (_e) {}
 
-    this.remoteAudioNodes.delete(participantId);
+    this.remoteTracks.delete(participantId);
   }
 
-  private cleanupAllNodes(): void {
-    for (const [id] of this.remoteAudioNodes.entries()) {
+  private cleanupAllTracks(): void {
+    for (const [id] of this.remoteTracks.entries()) {
       this.detachRemoteAudioTrack(id);
     }
-    this.remoteAudioNodes.clear();
+    this.remoteTracks.clear();
   }
 
   /**
@@ -253,23 +330,21 @@ export class VoiceManager {
     localPos: { x: number; y: number },
     remotePositions: Map<string, { x: number; y: number }>
   ): void {
-    if (!this.audioContext || this.remoteAudioNodes.size === 0) return;
+    if (this.remoteTracks.size === 0) return;
 
-    const now = this.audioContext.currentTime;
-
-    for (const [peerId, audioNode] of this.remoteAudioNodes.entries()) {
+    for (const [peerId, entry] of this.remoteTracks.entries()) {
       const remotePos = remotePositions.get(peerId);
       if (!remotePos) {
         // If peer position is unknown, mute smoothly
-        audioNode.gainNode.gain.setTargetAtTime(0, now, 0.08);
+        entry.track.setVolume(0);
         continue;
       }
 
       const dist = Math.hypot(localPos.x - remotePos.x, localPos.y - remotePos.y);
       const targetGain = this.calculateProximityGain(dist);
 
-      // Smooth volume transition without audio clicks
-      audioNode.gainNode.gain.setTargetAtTime(targetGain, now, 0.08);
+      // Smooth volume transition using LiveKit GainNode
+      entry.track.setVolume(targetGain);
     }
   }
 
@@ -303,24 +378,24 @@ export class VoiceManager {
   /**
    * Toggle local player microphone mute/unmute.
    */
-  toggleMute(): boolean {
+  async toggleMute(): Promise<boolean> {
+    await this.unlockAudio();
+
     if (!this.room || !this.isConnected) {
-      this.isMuted = !this.isMuted;
+      console.warn("[VoiceManager] Cannot toggle microphone: voice room not connected.");
       return this.isMuted;
     }
 
-    this.initAudioContext();
-    this.isMuted = !this.isMuted;
+    const nextMutedState = !this.isMuted;
 
-    this.room.localParticipant
-      .setMicrophoneEnabled(!this.isMuted)
-      .then(() => {
-        console.log(`[VoiceManager] Microphone ${this.isMuted ? "muted" : "unmuted"}`);
-      })
-      .catch((err) => {
-        console.error("[VoiceManager] Error toggling microphone:", err);
-        this.isMuted = true;
-      });
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(!nextMutedState);
+      this.isMuted = nextMutedState;
+      console.log(`[VoiceManager] Microphone state: ${this.isMuted ? "MUTED" : "UNMUTED"}`);
+    } catch (err) {
+      console.error("[VoiceManager] Error setting microphone state:", err);
+      this.isMuted = true;
+    }
 
     return this.isMuted;
   }
@@ -344,7 +419,8 @@ export class VoiceManager {
    * Clean up all LiveKit connections and Web Audio resources.
    */
   cleanup(): void {
-    this.cleanupAllNodes();
+    this.userInteractionCleanup?.();
+    this.cleanupAllTracks();
 
     if (this.room) {
       try {

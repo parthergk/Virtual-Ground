@@ -296,9 +296,9 @@ export class GroundScene extends Phaser.Scene {
     this.networkManager?.sendEmote(emote);
   }
 
-  private handleToggleMic(callback?: (isMuted: boolean) => void): void {
+  private async handleToggleMic(callback?: (isMuted: boolean) => void): Promise<void> {
     if (this.voiceManager) {
-      const isMuted = this.voiceManager.toggleMute();
+      const isMuted = await this.voiceManager.toggleMute();
       callback?.(isMuted);
     }
   }

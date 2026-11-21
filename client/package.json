@@ -7,7 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test:colyseus": "npx tsx scripts/test-verification.ts"
+    "test:colyseus": "npx tsx scripts/test-verification.ts",
+    "test:voice": "npx tsx scripts/test-voice-verification.ts"
   },
   "dependencies": {
     "@colyseus/schema": "2.0.36",
