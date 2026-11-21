@@ -9,13 +9,15 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
-# Next.js builds
+# Next.js builds & outputs
 .next/
 */.next/
 out/
 */out/
 build/
 */build/
+dist/
+*/dist/
 
 # Testing & Coverage
 coverage/

@@ -1,19 +1,32 @@
 {
   "name": "virtual-ground-server",
   "version": "1.0.0",
-  "description": "Real-time WebSocket server for Virtual Ramlila Ground",
-  "main": "index.js",
+  "type": "module",
+  "description": "Real-time Colyseus Game Server for Virtual Ramlila Ground",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start:legacy": "node index.js",
+    "dev:legacy": "nodemon index.js"
   },
   "dependencies": {
+    "@colyseus/schema": "2.0.36",
+    "@colyseus/tools": "0.15.22",
+    "@colyseus/ws-transport": "0.15.3",
+    "colyseus": "0.15.57",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.1",
+    "nodemon": "^3.1.9",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
   }
 }

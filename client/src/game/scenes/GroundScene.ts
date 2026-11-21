@@ -180,7 +180,7 @@ export class GroundScene extends Phaser.Scene {
       direction: facingDir,
     });
 
-    // Initialize Proximity Voice Manager with WebRTC Spatial Audio
+    // Initialize LiveKit Proximity Voice Manager with Web Audio Spatial Gain
     this.voiceManager = new VoiceManager(
       (speaking) => {
         this.player.setSpeaking(speaking);
@@ -189,10 +189,7 @@ export class GroundScene extends Phaser.Scene {
         this.remotePlayers.get(peerId)?.setSpeaking(speaking);
       }
     );
-    const sock = this.networkManager.getSocket();
-    if (sock) {
-      this.voiceManager.init(sock, this.playerCode);
-    }
+    this.voiceManager.init(null, this.playerCode);
 
     // Register React UI control event listeners
     this.game.events.on("trigger-emote", this.handleTriggerEmote, this);

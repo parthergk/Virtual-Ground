@@ -1,420 +1,369 @@
-import { Socket } from "socket.io-client";
+import {
+  Room,
+  RoomEvent,
+  RemoteTrack,
+  RemoteTrackPublication,
+  RemoteParticipant,
+  Track,
+  Participant,
+  ConnectionState,
+} from "livekit-client";
 
 /**
- * VoiceManager — Handles Peer-to-Peer WebRTC Voice Chat with Spatial Audio.
+ * VoiceManager — Handles Proximity Voice Chat powered by LiveKit + Web Audio API.
  *
- * Features:
- * - Direct P2P audio streams via WebRTC RTCPeerConnection with STUN fallback.
- * - Spatial Volume Attenuation (Web Audio API GainNode):
- *   - Close range (<= 60px): 100% volume
- *   - Fading range (60px - 280px): Linear smooth rolloff
- *   - Beyond 280px: 0% volume (completely silent)
- * - Volume meter using AnalyserNode for active speaking detection.
- * - Mute / Unmute toggle controls.
- * - Graceful fallback when microphone permission is denied or audio is not supported.
+ * Architecture:
+ * - Real-time audio transport: LiveKit SFU (WebRTC).
+ * - Room credentials obtained securely via Next.js `/api/livekit/token` API.
+ * - Proximity volume attenuation: Web Audio API `GainNode` attached to each remote track.
+ * - Proximity curve (configurable):
+ *   - 0–150 px: Full volume (1.0)
+ *   - 150–350 px: Linear fade (1.0 -> 0.3)
+ *   - 350–500 px: Very quiet (0.3 -> 0.05)
+ *   - > 500 px: Muted (0.0)
+ * - Automatic active-speaker detection via LiveKit `ActiveSpeakersChanged`.
+ * - Clean teardown of audio graph nodes, media streams, and room connections.
  */
 
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ],
+export interface ProximityConfig {
+  fullVolumeDist: number; // 0 - 150px
+  fadeDist: number;       // 150 - 350px
+  quietDist: number;      // 350 - 500px
+  mutedDist: number;      // > 500px
+}
+
+const DEFAULT_PROXIMITY: ProximityConfig = {
+  fullVolumeDist: 150,
+  fadeDist: 350,
+  quietDist: 500,
+  mutedDist: 500,
 };
 
-const CLOSE_DISTANCE = 60; // Full volume distance in world pixels
-const MAX_HEARING_DISTANCE = 280; // Distance where volume reaches 0
-
-interface PeerAudio {
-  pc: RTCPeerConnection;
-  remoteStream?: MediaStream;
-  sourceNode?: MediaStreamAudioSourceNode;
-  gainNode?: GainNode;
+interface RemoteAudioNode {
+  participantId: string;
+  sourceNode: MediaStreamAudioSourceNode;
+  gainNode: GainNode;
+  stream: MediaStream;
 }
 
 export class VoiceManager {
-  private socket: Socket | null = null;
-  private localPlayerId = "";
-  private localStream: MediaStream | null = null;
+  private room: Room | null = null;
+  private localPlayerCode = "";
   private audioContext: AudioContext | null = null;
-  private analyserNode: AnalyserNode | null = null;
+  private remoteAudioNodes = new Map<string, RemoteAudioNode>();
 
-  private peers = new Map<string, PeerAudio>();
   private isMuted = true;
-  private isSpeaking = false;
-  private speakingInterval: number | null = null;
+  private isConnected = false;
+  private isConfigured = false;
+  private proximityConfig: ProximityConfig = DEFAULT_PROXIMITY;
 
   private onSpeakingCallback: ((speaking: boolean) => void) | null = null;
   private onRemoteSpeakingCallback: ((peerId: string, speaking: boolean) => void) | null = null;
 
   constructor(
     onSpeaking?: (speaking: boolean) => void,
-    onRemoteSpeaking?: (peerId: string, speaking: boolean) => void
+    onRemoteSpeaking?: (peerId: string, speaking: boolean) => void,
+    config?: Partial<ProximityConfig>
   ) {
     if (onSpeaking) this.onSpeakingCallback = onSpeaking;
     if (onRemoteSpeaking) this.onRemoteSpeakingCallback = onRemoteSpeaking;
+    if (config) this.proximityConfig = { ...DEFAULT_PROXIMITY, ...config };
   }
 
   /**
-   * Initialize with Socket.io instance and local player access code.
+   * Initialize and connect to the LiveKit voice room.
    */
-  init(socket: Socket, localPlayerId: string): void {
-    this.socket = socket;
-    this.localPlayerId = localPlayerId;
+  async init(_legacySocketOrUnused: any, localPlayerCode?: string): Promise<void> {
+    const code = localPlayerCode || (typeof _legacySocketOrUnused === "string" ? _legacySocketOrUnused : "");
+    if (!code) {
+      console.warn("[VoiceManager] No player code provided for LiveKit voice chat.");
+      return;
+    }
 
-    // Listen for WebRTC signals from other players
-    this.socket.on(
-      "voice-signal",
-      async (data: {
-        fromId: string;
-        type: "offer" | "answer" | "candidate";
-        signal: any;
-      }) => {
-        await this.handleVoiceSignal(data.fromId, data.type, data.signal);
+    this.localPlayerCode = code;
+
+    try {
+      console.log(`[VoiceManager] Requesting LiveKit token for ${code}...`);
+      const res = await fetch("/api/livekit/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.configured) {
+        console.warn(
+          "[VoiceManager] LiveKit not configured or token generation failed:",
+          data.error || "Credentials missing"
+        );
+        this.isConfigured = false;
+        return;
+      }
+
+      this.isConfigured = true;
+
+      // Initialize Web Audio Context (lazy created on user gesture or room init)
+      this.initAudioContext();
+
+      // Create LiveKit Room
+      this.room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        audioCaptureDefaults: {
+          autoGainControl: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      this.setupRoomEvents();
+
+      // Connect to LiveKit SFU
+      await this.room.connect(data.url, data.token);
+      this.isConnected = true;
+      console.log(`[VoiceManager] Connected to LiveKit voice room "${data.room}" as "${data.identity}"`);
+
+      // Start muted by default
+      await this.room.localParticipant.setMicrophoneEnabled(false);
+      this.isMuted = true;
+
+    } catch (err) {
+      console.error("[VoiceManager] Failed to connect to LiveKit:", err);
+      this.isConnected = false;
+    }
+  }
+
+  private initAudioContext(): void {
+    if (!this.audioContext && typeof window !== "undefined") {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.audioContext = new AudioCtx();
+      }
+    }
+    if (this.audioContext && this.audioContext.state === "suspended") {
+      this.audioContext.resume().catch(() => {});
+    }
+  }
+
+  private setupRoomEvents(): void {
+    if (!this.room) return;
+
+    // Handle remote participant audio tracks
+    this.room.on(
+      RoomEvent.TrackSubscribed,
+      (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+        if (track.kind === Track.Kind.Audio) {
+          console.log(`[VoiceManager] Subscribed to audio track from: ${participant.identity}`);
+          this.attachRemoteAudioTrack(participant.identity, track);
+        }
       }
     );
 
-    // Listen for remote speaking updates
-    this.socket.on("player-speaking", (data: { id: string; speaking: boolean }) => {
-      this.onRemoteSpeakingCallback?.(data.id, data.speaking);
+    // Clean up when remote audio track unpublishes
+    this.room.on(
+      RoomEvent.TrackUnsubscribed,
+      (track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+        if (track.kind === Track.Kind.Audio) {
+          console.log(`[VoiceManager] Unsubscribed audio track from: ${participant.identity}`);
+          this.detachRemoteAudioTrack(participant.identity);
+        }
+      }
+    );
+
+    // Active speakers detection for visual speech rings
+    this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+      const speakerIdentities = new Set(speakers.map((s) => s.identity));
+
+      // Local player speaking
+      const isLocalSpeaking = speakerIdentities.has(this.localPlayerCode);
+      this.onSpeakingCallback?.(isLocalSpeaking);
+
+      // Remote players speaking
+      for (const [peerId] of this.remoteAudioNodes.entries()) {
+        const isPeerSpeaking = speakerIdentities.has(peerId);
+        this.onRemoteSpeakingCallback?.(peerId, isPeerSpeaking);
+      }
+    });
+
+    this.room.on(RoomEvent.Disconnected, () => {
+      console.log("[VoiceManager] Disconnected from LiveKit voice room.");
+      this.isConnected = false;
+      this.cleanupAllNodes();
     });
   }
 
   /**
-   * Request microphone permission and activate voice transmission.
+   * Route remote participant audio through Web Audio GainNode for proximity attenuation.
    */
-  async enableMicrophone(): Promise<boolean> {
-    if (this.localStream) {
-      this.setMuted(false);
-      return true;
-    }
+  private attachRemoteAudioTrack(participantId: string, track: RemoteTrack): void {
+    this.initAudioContext();
+    if (!this.audioContext || !track.mediaStreamTrack) return;
+
+    // Remove existing node for this participant if any
+    this.detachRemoteAudioTrack(participantId);
 
     try {
-      // Resume or create AudioContext upon user gesture
-      const AudioCtxClass =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (!this.audioContext && AudioCtxClass) {
-        this.audioContext = new AudioCtxClass();
-      }
-      if (this.audioContext && this.audioContext.state === "suspended") {
-        await this.audioContext.resume();
-      }
+      const stream = new MediaStream([track.mediaStreamTrack]);
+      const sourceNode = this.audioContext.createMediaStreamSource(stream);
+      const gainNode = this.audioContext.createGain();
 
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
+      // Start with default volume
+      gainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime);
+
+      sourceNode.connect(gainNode);
+      gainNode.connect(this.audioContext.destination);
+
+      this.remoteAudioNodes.set(participantId, {
+        participantId,
+        sourceNode,
+        gainNode,
+        stream,
       });
 
-      this.isMuted = false;
-
-      // Set up speaking detection
-      this.setupSpeakingDetection();
-
-      // Add local audio tracks to any existing peer connections
-      for (const [peerId, peer] of this.peers.entries()) {
-        this.localStream.getAudioTracks().forEach((track) => {
-          peer.pc.addTrack(track, this.localStream!);
-        });
-        // Renegotiate offer
-        this.createAndSendOffer(peerId, peer.pc);
-      }
-
-      return true;
+      console.log(`[VoiceManager] Web Audio GainNode attached for ${participantId}`);
     } catch (err) {
-      console.warn("[VoiceManager] Could not enable microphone:", err);
-      return false;
+      console.error(`[VoiceManager] Error setting up Web Audio for ${participantId}:`, err);
     }
+  }
+
+  private detachRemoteAudioTrack(participantId: string): void {
+    const node = this.remoteAudioNodes.get(participantId);
+    if (!node) return;
+
+    try {
+      node.sourceNode.disconnect();
+      node.gainNode.disconnect();
+    } catch (_e) {}
+
+    this.remoteAudioNodes.delete(participantId);
+  }
+
+  private cleanupAllNodes(): void {
+    for (const [id] of this.remoteAudioNodes.entries()) {
+      this.detachRemoteAudioTrack(id);
+    }
+    this.remoteAudioNodes.clear();
   }
 
   /**
-   * Toggle mute state. Returns the new mute state (true = muted, false = unmuted).
-   */
-  toggleMute(): boolean {
-    if (!this.localStream) {
-      this.enableMicrophone();
-      return false;
-    }
-
-    const nextMuted = !this.isMuted;
-    this.setMuted(nextMuted);
-    return nextMuted;
-  }
-
-  setMuted(muted: boolean): void {
-    this.isMuted = muted;
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !muted;
-      });
-    }
-
-    if (muted && this.isSpeaking) {
-      this.isSpeaking = false;
-      this.onSpeakingCallback?.(false);
-      this.socket?.emit("player-speaking", { speaking: false });
-    }
-  }
-
-  getIsMuted(): boolean {
-    return this.isMuted;
-  }
-
-  /**
-   * Call when a new peer joins the ground to initiate connection.
-   */
-  async connectToPeer(peerId: string): Promise<void> {
-    if (peerId === this.localPlayerId || this.peers.has(peerId)) return;
-
-    const pc = this.createPeerConnection(peerId);
-    this.peers.set(peerId, { pc });
-
-    // Add local tracks if we already have a stream
-    if (this.localStream) {
-      this.localStream.getAudioTracks().forEach((track) => {
-        pc.addTrack(track, this.localStream!);
-      });
-    }
-
-    await this.createAndSendOffer(peerId, pc);
-  }
-
-  /**
-   * Remove peer when they disconnect.
-   */
-  disconnectPeer(peerId: string): void {
-    const peer = this.peers.get(peerId);
-    if (peer) {
-      peer.gainNode?.disconnect();
-      peer.sourceNode?.disconnect();
-      peer.pc.close();
-      this.peers.delete(peerId);
-    }
-  }
-
-  /**
-   * Updates proximity audio volume based on Euclidean distance in Phaser world coordinates.
-   * Called every frame in GroundScene.update().
+   * Calculate distance between local player and remote players, updating GainNode volumes.
    */
   updateSpatialAudio(
     localPos: { x: number; y: number },
     remotePositions: Map<string, { x: number; y: number }>
   ): void {
-    if (!this.audioContext || this.audioContext.state !== "running") return;
+    if (!this.audioContext || this.remoteAudioNodes.size === 0) return;
 
-    for (const [peerId, peer] of this.peers.entries()) {
-      if (!peer.gainNode) continue;
+    const now = this.audioContext.currentTime;
 
+    for (const [peerId, audioNode] of this.remoteAudioNodes.entries()) {
       const remotePos = remotePositions.get(peerId);
       if (!remotePos) {
-        peer.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+        // If peer position is unknown, mute smoothly
+        audioNode.gainNode.gain.setTargetAtTime(0, now, 0.08);
         continue;
       }
 
-      const dist = Math.hypot(remotePos.x - localPos.x, remotePos.y - localPos.y);
+      const dist = Math.hypot(localPos.x - remotePos.x, localPos.y - remotePos.y);
+      const targetGain = this.calculateProximityGain(dist);
 
-      let targetGain = 0;
-      if (dist <= CLOSE_DISTANCE) {
-        targetGain = 1.0;
-      } else if (dist < MAX_HEARING_DISTANCE) {
-        // Linear volume drop-off between CLOSE_DISTANCE and MAX_HEARING_DISTANCE
-        targetGain =
-          1.0 - (dist - CLOSE_DISTANCE) / (MAX_HEARING_DISTANCE - CLOSE_DISTANCE);
-      }
-
-      // Smooth gain transition to avoid audio popping
-      peer.gainNode.gain.setTargetAtTime(
-        Math.max(0, Math.min(1, targetGain)),
-        this.audioContext.currentTime,
-        0.04
-      );
+      // Smooth volume transition without audio clicks
+      audioNode.gainNode.gain.setTargetAtTime(targetGain, now, 0.08);
     }
   }
 
-  // ─── Private WebRTC Helpers ──────────────────────────────────────────
+  /**
+   * Mathematical proximity volume curve:
+   * 0 - 150px: Full volume (1.0)
+   * 150 - 350px: Linear fade (1.0 -> 0.3)
+   * 350 - 500px: Very quiet (0.3 -> 0.05)
+   * > 500px: Muted (0.0)
+   */
+  private calculateProximityGain(distance: number): number {
+    const { fullVolumeDist, fadeDist, quietDist } = this.proximityConfig;
 
-  private createPeerConnection(peerId: string): RTCPeerConnection {
-    const pc = new RTCPeerConnection(ICE_SERVERS);
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate && this.socket) {
-        this.socket.emit("voice-signal", {
-          toId: peerId,
-          type: "candidate",
-          signal: event.candidate,
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        this.setupRemoteAudio(peerId, remoteStream);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-        this.disconnectPeer(peerId);
-      }
-    };
-
-    return pc;
-  }
-
-  private setupRemoteAudio(peerId: string, stream: MediaStream): void {
-    if (!this.audioContext) {
-      const AudioCtxClass =
-        window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtxClass) {
-        this.audioContext = new AudioCtxClass();
-      }
+    if (distance <= fullVolumeDist) {
+      return 1.0;
     }
 
-    if (!this.audioContext) return;
-
-    try {
-      const sourceNode = this.audioContext.createMediaStreamSource(stream);
-      const gainNode = this.audioContext.createGain();
-
-      // Start muted until proximity calculation sets the proper volume
-      gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-
-      sourceNode.connect(gainNode);
-      gainNode.connect(this.audioContext.destination);
-
-      const peer = this.peers.get(peerId);
-      if (peer) {
-        peer.remoteStream = stream;
-        peer.sourceNode = sourceNode;
-        peer.gainNode = gainNode;
-      }
-    } catch (err) {
-      console.warn("[VoiceManager] Could not set up spatial audio node:", err);
+    if (distance <= fadeDist) {
+      const t = (distance - fullVolumeDist) / (fadeDist - fullVolumeDist);
+      return 1.0 - t * 0.7; // 1.0 down to 0.3
     }
+
+    if (distance <= quietDist) {
+      const t = (distance - fadeDist) / (quietDist - fadeDist);
+      return 0.3 - t * 0.25; // 0.3 down to 0.05
+    }
+
+    return 0.0;
   }
 
-  private async createAndSendOffer(
-    peerId: string,
-    pc: RTCPeerConnection
-  ): Promise<void> {
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      this.socket?.emit("voice-signal", {
-        toId: peerId,
-        type: "offer",
-        signal: offer,
+  /**
+   * Toggle local player microphone mute/unmute.
+   */
+  toggleMute(): boolean {
+    if (!this.room || !this.isConnected) {
+      this.isMuted = !this.isMuted;
+      return this.isMuted;
+    }
+
+    this.initAudioContext();
+    this.isMuted = !this.isMuted;
+
+    this.room.localParticipant
+      .setMicrophoneEnabled(!this.isMuted)
+      .then(() => {
+        console.log(`[VoiceManager] Microphone ${this.isMuted ? "muted" : "unmuted"}`);
+      })
+      .catch((err) => {
+        console.error("[VoiceManager] Error toggling microphone:", err);
+        this.isMuted = true;
       });
-    } catch (err) {
-      console.warn("[VoiceManager] Error creating offer:", err);
-    }
+
+    return this.isMuted;
   }
 
-  private async handleVoiceSignal(
-    fromId: string,
-    type: "offer" | "answer" | "candidate",
-    signal: any
-  ): Promise<void> {
-    let peer = this.peers.get(fromId);
-
-    if (type === "offer") {
-      if (!peer) {
-        const pc = this.createPeerConnection(fromId);
-        peer = { pc };
-        this.peers.set(fromId, peer);
-
-        if (this.localStream) {
-          this.localStream.getAudioTracks().forEach((track) => {
-            pc.addTrack(track, this.localStream!);
-          });
-        }
-      }
-
-      await peer.pc.setRemoteDescription(new RTCSessionDescription(signal));
-      const answer = await peer.pc.createAnswer();
-      await peer.pc.setLocalDescription(answer);
-
-      this.socket?.emit("voice-signal", {
-        toId: fromId,
-        type: "answer",
-        signal: answer,
-      });
-    } else if (type === "answer" && peer) {
-      await peer.pc.setRemoteDescription(new RTCSessionDescription(signal));
-    } else if (type === "candidate" && peer) {
-      try {
-        await peer.pc.addIceCandidate(new RTCIceCandidate(signal));
-      } catch (e) {
-        console.warn("[VoiceManager] Could not add ICE candidate:", e);
-      }
-    }
+  /**
+   * Peer connection helpers (maintained for backwards compatibility with GroundScene).
+   */
+  connectToPeer(_peerId: string): void {
+    // Handled automatically by LiveKit room subscriptions
   }
 
-  private setupSpeakingDetection(): void {
-    if (!this.localStream || !this.audioContext) return;
-
-    try {
-      const source = this.audioContext.createMediaStreamSource(this.localStream);
-      this.analyserNode = this.audioContext.createAnalyser();
-      this.analyserNode.fftSize = 256;
-      source.connect(this.analyserNode);
-
-      const bufferLength = this.analyserNode.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      this.speakingInterval = window.setInterval(() => {
-        if (!this.analyserNode || this.isMuted) {
-          if (this.isSpeaking) {
-            this.isSpeaking = false;
-            this.onSpeakingCallback?.(false);
-            this.socket?.emit("player-speaking", { speaking: false });
-          }
-          return;
-        }
-
-        this.analyserNode.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / bufferLength;
-        const nowSpeaking = avg > 18; // Threshold for vocal energy
-
-        if (nowSpeaking !== this.isSpeaking) {
-          this.isSpeaking = nowSpeaking;
-          this.onSpeakingCallback?.(nowSpeaking);
-          this.socket?.emit("player-speaking", { speaking: nowSpeaking });
-        }
-      }, 100);
-    } catch (err) {
-      console.warn("[VoiceManager] Could not initialize speaking meter:", err);
-    }
+  disconnectPeer(peerId: string): void {
+    this.detachRemoteAudioTrack(peerId);
   }
 
+  isVoiceConnected(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * Clean up all LiveKit connections and Web Audio resources.
+   */
   cleanup(): void {
-    if (this.speakingInterval) {
-      clearInterval(this.speakingInterval);
-      this.speakingInterval = null;
+    this.cleanupAllNodes();
+
+    if (this.room) {
+      try {
+        if (this.room.state === ConnectionState.Connected) {
+          this.room.disconnect();
+        }
+      } catch (_e) {}
+      this.room = null;
     }
 
-    for (const [peerId] of this.peers) {
-      this.disconnectPeer(peerId);
-    }
-    this.peers.clear();
-
-    if (this.localStream) {
-      this.localStream.getTracks().forEach((track) => track.stop());
-      this.localStream = null;
-    }
-
-    if (this.audioContext) {
-      this.audioContext.close();
+    if (this.audioContext && this.audioContext.state !== "closed") {
+      try {
+        this.audioContext.close();
+      } catch (_e) {}
       this.audioContext = null;
     }
 
-    this.socket = null;
+    this.isConnected = false;
+    this.onSpeakingCallback = null;
+    this.onRemoteSpeakingCallback = null;
   }
 }
